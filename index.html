@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0E0B08" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="RAE" />
+  <meta name="description" content="Relational Alignment Engine — A private tool for mapping and maintaining relationship structure." />
+
+  <title>RAE</title>
+
+  <!-- PWA -->
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=DM+Mono:wght@300;400&display=swap"
+    rel="stylesheet"
+  />
+
+  <!-- Styles -->
+  <link rel="stylesheet" href="styles/base.css" />
+  <link rel="stylesheet" href="styles/survey.css" />
+  <link rel="stylesheet" href="styles/dashboard.css" />
+
+  <!-- QR Libraries (bundled, no CDN dependency) -->
+  <script src="lib/qrcode.min.js"></script>
+  <script src="lib/jsQR.min.js"></script>
+</head>
+<body>
+  <div id="app"></div>
+  <div id="toast-container"></div>
+
+  <script type="module">
+    import { boot } from './src/ui/app.js';
+    boot().catch(err => {
+      document.getElementById('app').innerHTML = `
+        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:1rem;padding:2rem;text-align:center;">
+          <div style="font-family:serif;color:#E85D5D;font-size:1.1rem;">Boot Error</div>
+          <div style="font-family:monospace;font-size:0.8rem;color:#9A8B72;">${err.message}</div>
+          <button onclick="location.reload()" style="padding:0.5rem 1rem;background:var(--ember,#E8A84C);border:none;border-radius:6px;cursor:pointer;">
+            Reload
+          </button>
+        </div>
+      `;
+      console.error('[RAE] Boot failed:', err);
+    });
+  </script>
+
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').then(reg => {
+        reg.addEventListener('updatefound', () => {
+          const worker = reg.installing;
+          worker.addEventListener('statechange', () => {
+            if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+              worker.postMessage('skip-waiting');
+            }
+          });
+        });
+      }).catch(err => console.warn('[RAE] SW registration failed:', err));
+    }
+  </script>
+</body>
+</html>
