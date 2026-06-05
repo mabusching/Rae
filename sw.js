@@ -1,35 +1,40 @@
-/**
- * sw.js — Service Worker for offline PWA support
- * Caches all static assets on install, serves from cache first
- */
+// sw.js
 
 const CACHE_NAME = 'rae-v1';
 
-const STATIC_ASSETS = [
-  '/',
-  '/index.html',
-  '/manifest.json',
-  '/styles/base.css',
-  '/styles/survey.css',
-  '/styles/dashboard.css',
-  '/lib/qrcode.min.js',
-  '/lib/jsQR.min.js',
-  '/src/crypto.js',
-  '/src/storage.js',
-  '/src/domains.js',
-  '/src/identity.js',
-  '/src/divergence.js',
-  '/src/webrtc.js',
-  '/src/ui/app.js',
-  '/src/ui/onboarding.js',
-  '/src/ui/dashboard.js',
-  '/src/ui/survey.js',
-  '/src/ui/pass3.js',
-  '/src/ui/connect.js',
+// 1. Identify the subdirectory path dynamically
+// If hosted at username.github.io/repository-name/sw.js, 
+// basePath becomes "/repository-name/"
+const basePath = self.location.pathname.substring(0, self.location.pathname.lastIndexOf('/') + 1);
+
+// 2. Define assets strictly relative to the application structure (no leading slashes)
+const RELATIVE_ASSETS = [
+  '',
+  'index.html',
+  'manifest.json',
+  'styles/base.css',
+  'styles/survey.css',
+  'styles/dashboard.css',
+  'lib/qrcode.min.js',
+  'lib/jsQR.min.js',
+  'src/crypto.js',
+  'src/storage.js',
+  'src/domains.js',
+  'src/identity.js',
+  'src/divergence.js',
+  'src/webrtc.js',
+  'src/ui/app.js',
+  'src/ui/onboarding.js',
+  'src/ui/dashboard.js',
+  'src/ui/survey.js',
+  'src/ui/pass3.js',
+  'src/ui/connect.js',
 ];
 
-// ── INSTALL ───────────────────────────────────────────────────────────────────
+// 3. Map the assets to the dynamic base path so cache.addAll gets the absolute URLs it requires
+const STATIC_ASSETS = RELATIVE_ASSETS.map(asset => `${basePath}${asset}`);
 
+// ── INSTALL ───────────────────────────────────────────────────────────────────
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
@@ -38,27 +43,9 @@ self.addEventListener('install', (event) => {
   );
 });
 
-// ── ACTIVATE ──────────────────────────────────────────────────────────────────
-
-self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
-        cacheNames
-          .filter(name => name !== CACHE_NAME)
-          .map(name => caches.delete(name))
-      );
-    }).then(() => self.clients.claim())
-  );
-});
-
 // ── FETCH ─────────────────────────────────────────────────────────────────────
-
 self.addEventListener('fetch', (event) => {
-  // Only handle same-origin requests
   if (!event.request.url.startsWith(self.location.origin)) return;
-
-  // Skip non-GET requests
   if (event.request.method !== 'GET') return;
 
   event.respondWith(
@@ -66,7 +53,6 @@ self.addEventListener('fetch', (event) => {
       if (cached) return cached;
 
       return fetch(event.request).then((response) => {
-        // Cache successful responses
         if (response.ok) {
           const responseClone = response.clone();
           caches.open(CACHE_NAME).then((cache) => {
@@ -75,9 +61,9 @@ self.addEventListener('fetch', (event) => {
         }
         return response;
       }).catch(() => {
-        // Offline fallback for navigation requests
+        // Use the dynamic fallback path for navigation requests
         if (event.request.mode === 'navigate') {
-          return caches.match('/index.html');
+          return caches.match(`${basePath}index.html`);
         }
       });
     })
