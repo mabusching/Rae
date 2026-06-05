@@ -24,7 +24,9 @@ export async function renderDashboard() {
   `;
 
   wrap.appendChild(content);
-  wrap.innerHTML += renderNav('dashboard');
+  const _nav = document.createElement('div');
+  _nav.innerHTML = renderNav('dashboard');
+  wrap.appendChild(_nav);
 
   setTimeout(() => {
     renderIdentityCard(content.querySelector('#identity-section'), identity);
@@ -87,7 +89,7 @@ function renderRelationshipsList(container, relationships) {
       <hr class="divider"/>
       <div id="standalone-section"></div>
     `;
-    container.querySelector('#connect-first-btn')?.addEventListener('click', () => navigate('connect'));
+    container.querySelector('#connect-first-btn')?.addEventListener('click', async () => { await navigate('connect'); });
     renderStandaloneSection(container.querySelector('#standalone-section'));
     return;
   }
@@ -108,7 +110,7 @@ function renderRelationshipsList(container, relationships) {
     list.appendChild(card);
   });
 
-  container.querySelector('#add-connection-btn')?.addEventListener('click', () => navigate('connect'));
+  container.querySelector('#add-connection-btn')?.addEventListener('click', async () => { await navigate('connect'); });
   renderStandaloneSection(container.querySelector('#standalone-section'));
 }
 
@@ -195,10 +197,10 @@ function showRelationshipOptions(rel, card) {
 
   document.body.appendChild(menu);
 
-  menu.querySelector('#opt-sync').addEventListener('click', () => {
+  menu.querySelector('#opt-sync').addEventListener('click', async () => {
     menu.remove();
     state.activeRelationshipId = rel.id;
-    navigate('connect');
+    await navigate('connect');
   });
 
   menu.querySelector('#opt-edges').addEventListener('click', () => {
@@ -263,10 +265,10 @@ function renderStandaloneSection(container) {
     </div>
   `;
 
-  container.querySelector('#abs-profile-btn').addEventListener('click', () => {
+  container.querySelector('#abs-profile-btn').addEventListener('click', async () => {
     state.activeRelationshipId = null;
     state.activeSession = null;
-    navigate('survey', { currentPass: 2 });
+    await navigate('survey', { currentPass: 2 });
   });
 }
 
@@ -287,11 +289,11 @@ function formatRelativeTime(timestamp) {
 
 function bindNavEvents(wrap) {
   wrap.querySelectorAll('[data-nav]').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const target = btn.dataset.nav;
-      if (target === 'dashboard') navigate('dashboard');
-      else if (target === 'survey') navigate('survey', { currentPass: state.currentPass || 1 });
-      else if (target === 'connect') navigate('connect');
+      if (target === 'dashboard') await navigate('dashboard');
+      else if (target === 'survey') await navigate('survey', { currentPass: state.currentPass || 1 });
+      else if (target === 'connect') await navigate('connect');
     });
   });
 }

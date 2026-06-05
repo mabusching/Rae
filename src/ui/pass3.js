@@ -33,7 +33,9 @@ export async function renderPass3() {
   `;
 
   wrap.appendChild(content);
-  wrap.innerHTML += renderNav('survey');
+  const _nav = document.createElement('div');
+  _nav.innerHTML = renderNav('survey');
+  wrap.appendChild(_nav);
 
   setTimeout(() => {
     const body = content.querySelector('#pass3-body');
@@ -64,7 +66,7 @@ function renderWaitingForSync(container, relationship) {
       </button>
     </div>
   `;
-  container.querySelector('#go-connect-btn')?.addEventListener('click', () => navigate('connect'));
+  container.querySelector('#go-connect-btn')?.addEventListener('click', async () => { await navigate('connect'); });
 }
 
 // ── DIVERGENCE + AGREEMENT VIEW ───────────────────────────────────────────────
@@ -565,11 +567,11 @@ function exportLog(session, resolved, unresolved, reviewDate) {
 
 function bindNavEvents(wrap) {
   wrap.querySelectorAll('[data-nav]').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const target = btn.dataset.nav;
-      if (target === 'dashboard') navigate('dashboard');
-      else if (target === 'survey') navigate('survey', { currentPass: state.currentPass || 1 });
-      else if (target === 'connect') navigate('connect');
+      if (target === 'dashboard') await navigate('dashboard');
+      else if (target === 'survey') await navigate('survey', { currentPass: state.currentPass || 1 });
+      else if (target === 'connect') await navigate('connect');
     });
   });
 }

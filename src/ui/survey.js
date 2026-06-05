@@ -51,7 +51,9 @@ export async function renderSurvey(pass = 1) {
   `;
 
   wrap.appendChild(content);
-  wrap.innerHTML += renderNav('survey');
+  const _nav = document.createElement('div');
+  _nav.innerHTML = renderNav('survey');
+  wrap.appendChild(_nav);
 
   setTimeout(() => {
     buildDomainCards(content, session, pass, edgesUnlocked, relationship);
@@ -341,7 +343,7 @@ async function updatePassData(session, domainId, pass, updates) {
   Object.assign(domainData[key], updates);
   session.updatedAt = Date.now();
 
-  if (session.id !== 'standalone_session') {
+  if (session.relationshipId && session.relationshipId !== 'standalone') {
     await saveSession(session);
   }
 }
@@ -471,7 +473,7 @@ function buildSignoffSection(container, session, pass, relationship) {
   signoffBtn.addEventListener('click', async () => {
     session.signoffs[`pass${pass}`].mine = true;
     session.updatedAt = Date.now();
-    if (session.id !== 'standalone_session') await saveSession(session);
+    if (session.relationshipId && session.relationshipId !== 'standalone') await saveSession(session);
     toast('Sign-off recorded');
     buildSignoffSection(container, session, pass, relationship);
   });
@@ -481,11 +483,11 @@ function buildSignoffSection(container, session, pass, relationship) {
 
 function bindNavEvents(wrap) {
   wrap.querySelectorAll('[data-nav]').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const target = btn.dataset.nav;
-      if (target === 'dashboard') navigate('dashboard');
-      else if (target === 'survey') navigate('survey', { currentPass: 1 });
-      else if (target === 'connect') navigate('connect');
+      if (target === 'dashboard') await navigate('dashboard');
+      else if (target === 'survey') await navigate('survey', { currentPass: 1 });
+      else if (target === 'connect') await navigate('connect');
     });
   });
 }

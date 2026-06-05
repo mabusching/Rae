@@ -36,7 +36,9 @@ export async function renderConnect() {
   `;
 
   wrap.appendChild(content);
-  wrap.innerHTML += renderNav('connect');
+  const _nav = document.createElement('div');
+  _nav.innerHTML = renderNav('connect');
+  wrap.appendChild(_nav);
 
   setTimeout(() => {
     renderConnectOptions(content.querySelector('#connect-body'));
@@ -349,8 +351,8 @@ async function handleReceivedPayload(encryptedData, container) {
             View Divergence Analysis →
           </button>
         `;
-        statusEl.querySelector('#go-pass3-btn')?.addEventListener('click', () => {
-          navigate('pass3');
+        statusEl.querySelector('#go-pass3-btn')?.addEventListener('click', async () => {
+          await navigate('pass3');
         });
       }
       toast('Partner session received');
@@ -516,12 +518,12 @@ function getMyPrivateKey() {
 
 function bindNavEvents(wrap) {
   wrap.querySelectorAll('[data-nav]').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       stopCamera();
       const target = btn.dataset.nav;
-      if (target === 'dashboard') navigate('dashboard');
-      else if (target === 'survey') navigate('survey', { currentPass: state.currentPass || 1 });
-      else if (target === 'connect') navigate('connect');
+      if (target === 'dashboard') await navigate('dashboard');
+      else if (target === 'survey') await navigate('survey', { currentPass: state.currentPass || 1 });
+      else if (target === 'connect') await navigate('connect');
     });
   });
 }

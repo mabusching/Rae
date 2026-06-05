@@ -16,6 +16,7 @@ import {
   setEncryptionKey,
   saveKeypair,
   loadAndActivateKeypair,
+  loadAllRelationships,
 } from '../storage.js';
 import { generateIdenticon, svgToDataURL, shortFingerprint } from '../identity.js';
 import { state, navigate, toast } from './app.js';
@@ -309,7 +310,7 @@ function renderUnlockStep() {
         if (!keypair) throw new Error('Keypair not found — storage may be corrupted');
 
         state.identity = identity;
-        state.relationships = await (await import('../storage.js')).loadAllRelationships();
+        state.relationships = await loadAllRelationships();
         await navigate('dashboard');
       } catch (e) {
         errorEl.textContent = 'Incorrect PIN';
