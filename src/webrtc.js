@@ -3,7 +3,7 @@
  * QR calling card handshake, RTCDataChannel, encrypted payload exchange
  */
 
-import { exportPublicKey, importPublicKey, deriveSharedKey, encrypt, decrypt, bufferToBase64, base64ToBuffer } from './crypto.js';
+import { importPublicKey, deriveSharedKey, encrypt, decrypt } from './crypto.js';
 
 // No STUN servers for local network mode.
 // STUN is for NAT traversal across the internet — on a shared local network,
@@ -49,12 +49,11 @@ export async function createOffer(identity) {
   // On local network, host candidates arrive within ~500ms
   await waitForICE(_pc);
 
-  const publicKeyB64 = await exportPublicKey(identity.publicKey);
-
+  // identity.publicKey is already base64 — stored that way in the identity record
   return {
     type: 'rae-offer',
     sdp: _pc.localDescription.sdp,
-    publicKey: publicKeyB64,
+    publicKey: identity.publicKey,
     alias: identity.alias,
     identicon: identity.identicon,
   };
@@ -96,12 +95,11 @@ export async function receiveOfferAndAnswer(offerPayload, identity) {
 
   await waitForICE(_pc);
 
-  const publicKeyB64 = await exportPublicKey(identity.publicKey);
-
+  // identity.publicKey is already base64 — stored that way in the identity record
   return {
     type: 'rae-answer',
     sdp: _pc.localDescription.sdp,
-    publicKey: publicKeyB64,
+    publicKey: identity.publicKey,
     alias: identity.alias,
     identicon: identity.identicon,
     offerPublicKey: offerPayload.publicKey,
