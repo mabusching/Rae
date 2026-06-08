@@ -3,7 +3,7 @@
  * Handles routing, global state, and view orchestration
  */
 
-import { initDB, loadKeyMeta, hasKeyMeta, loadIdentity, isUnlocked, loadAllRelationships, loadAndActivateKeypair } from '../storage.js';
+import { initDB, loadKeyMeta, hasKeyMeta, loadIdentity, isUnlocked, loadAllRelationships, loadAndActivateKeypair,clearEncryptionKey } from '../storage.js';
 import { renderOnboarding } from './onboarding.js';
 import { renderDashboard } from './dashboard.js';
 import { renderSurvey } from './survey.js';
