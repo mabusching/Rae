@@ -37,6 +37,8 @@ const STATIC_ASSETS = [
   url('/src/ui/survey.js'),
   url('/src/ui/pass3.js'),
   url('/src/ui/connect.js'),
+  url('/icons/icon-192.png'),
+  url('/icons/icon-512.png'),
 ];
 
 // ── INSTALL ───────────────────────────────────────────────────────────────────

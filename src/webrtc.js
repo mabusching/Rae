@@ -5,13 +5,14 @@
 
 import { exportPublicKey, importPublicKey, deriveSharedKey, encrypt, decrypt, bufferToBase64, base64ToBuffer } from './crypto.js';
 
-const ICE_SERVERS = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' },
-];
+// No STUN servers for local network mode.
+// STUN is for NAT traversal across the internet — on a shared local network,
+// host candidates (local IP addresses) are gathered immediately and are
+// sufficient for device-to-device connections. STUN causes the ICE timeout.
+const ICE_SERVERS = [];
 
 const CHUNK_SIZE = 16384; // 16KB chunks for large payloads
-const CONNECTION_TIMEOUT = 60000; // 60s
+const ICE_GATHER_TIMEOUT = 3000; // 3s max wait — host candidates arrive in <500ms locally
 
 // ── CONNECTION STATE ──────────────────────────────────────────────────────────
 
@@ -44,7 +45,8 @@ export async function createOffer(identity) {
   const offer = await _pc.createOffer();
   await _pc.setLocalDescription(offer);
 
-  // Wait for ICE gathering to complete
+  // Wait for ICE gathering (or timeout) before encoding QR
+  // On local network, host candidates arrive within ~500ms
   await waitForICE(_pc);
 
   const publicKeyB64 = await exportPublicKey(identity.publicKey);
@@ -142,15 +144,24 @@ function setupDataChannel(dc) {
 }
 
 function waitForICE(pc) {
-  return new Promise((resolve, reject) => {
+  // Resolves when ICE gathering completes OR after timeout — never rejects.
+  // On a local network, host candidates arrive in <500ms.
+  // We wait up to 3s then proceed with whatever candidates we have.
+  // This is the correct approach for QR-based signaling: encode the SDP
+  // with gathered candidates and display the QR immediately.
+  return new Promise((resolve) => {
     if (pc.iceGatheringState === 'complete') {
       resolve();
       return;
     }
-    const timeout = setTimeout(() => reject(new Error('ICE timeout')), CONNECTION_TIMEOUT);
+    const timer = setTimeout(() => {
+      console.log('[WebRTC] ICE gather timeout — proceeding with available candidates');
+      resolve();
+    }, ICE_GATHER_TIMEOUT);
+
     pc.onicegatheringstatechange = () => {
       if (pc.iceGatheringState === 'complete') {
-        clearTimeout(timeout);
+        clearTimeout(timer);
         resolve();
       }
     };

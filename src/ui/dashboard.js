@@ -2,7 +2,7 @@
  * dashboard.js — Main dashboard: identity, relationships, status
  */
 
-import { loadAllRelationships, loadLatestSession, deleteRelationship, deleteKeypair, saveKeypair } from '../storage.js';
+import { loadAllRelationships, loadLatestSession, deleteRelationship, deleteKeypair, saveKeypair, clearEncryptionKey } from '../storage.js';
 import { generateKeypair, exportPublicKey, hashPublicKey } from '../crypto.js';
 import { generateIdenticon, svgToDataURL } from '../identity.js';
 import { shortFingerprint } from '../identity.js';
@@ -61,7 +61,6 @@ function renderIdentityCard(container, identity) {
   `;
 
   container.querySelector('#lock-btn').addEventListener('click', async () => {
-    const { clearEncryptionKey } = await import('../storage.js');
     clearEncryptionKey();
     state.identity = null;
     state.relationships = [];
