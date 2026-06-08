@@ -6,7 +6,7 @@ import { loadAllRelationships, loadLatestSession, deleteRelationship, deleteKeyp
 import { generateKeypair, exportPublicKey, hashPublicKey } from '../crypto.js';
 import { generateIdenticon, svgToDataURL } from '../identity.js';
 import { shortFingerprint } from '../identity.js';
-import { state, navigate, toast, renderNav, clearEncryptionKey } from './app.js';
+import { state, navigate, toast, renderNav } from './app.js';
 
 export async function renderDashboard() {
   const wrap = document.createElement('div');
