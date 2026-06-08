@@ -72,6 +72,22 @@ export function initDB() {
     };
 
     req.onerror = () => reject(req.error);
+
+    // Fires if another tab has the DB open at an older version.
+    // Force-closes the connection so the upgrade can proceed.
+    req.onblocked = () => {
+      console.warn('[RAE] IDB upgrade blocked — close other tabs and reload');
+      // Don't reject — the user needs to close other tabs.
+      // Show a message if we can reach the DOM.
+      const app = document.getElementById('app');
+      if (app) {
+        app.innerHTML = `
+          <div style="display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column;gap:1rem;padding:2rem;text-align:center;">
+            <div style="color:#E8A84C;font-family:serif;font-size:1.1rem;">Close other tabs running RAE, then reload.</div>
+          </div>
+        `;
+      }
+    };
   });
 }
 
@@ -190,6 +206,22 @@ function idbPut(storeName, record) {
     const req = tx.objectStore(storeName).put(record);
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
+
+    // Fires if another tab has the DB open at an older version.
+    // Force-closes the connection so the upgrade can proceed.
+    req.onblocked = () => {
+      console.warn('[RAE] IDB upgrade blocked — close other tabs and reload');
+      // Don't reject — the user needs to close other tabs.
+      // Show a message if we can reach the DOM.
+      const app = document.getElementById('app');
+      if (app) {
+        app.innerHTML = `
+          <div style="display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column;gap:1rem;padding:2rem;text-align:center;">
+            <div style="color:#E8A84C;font-family:serif;font-size:1.1rem;">Close other tabs running RAE, then reload.</div>
+          </div>
+        `;
+      }
+    };
   });
 }
 
@@ -199,6 +231,22 @@ function idbGet(storeName, id) {
     const req = tx.objectStore(storeName).get(id);
     req.onsuccess = () => resolve(req.result || null);
     req.onerror = () => reject(req.error);
+
+    // Fires if another tab has the DB open at an older version.
+    // Force-closes the connection so the upgrade can proceed.
+    req.onblocked = () => {
+      console.warn('[RAE] IDB upgrade blocked — close other tabs and reload');
+      // Don't reject — the user needs to close other tabs.
+      // Show a message if we can reach the DOM.
+      const app = document.getElementById('app');
+      if (app) {
+        app.innerHTML = `
+          <div style="display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column;gap:1rem;padding:2rem;text-align:center;">
+            <div style="color:#E8A84C;font-family:serif;font-size:1.1rem;">Close other tabs running RAE, then reload.</div>
+          </div>
+        `;
+      }
+    };
   });
 }
 
@@ -208,6 +256,22 @@ function idbGetAll(storeName) {
     const req = tx.objectStore(storeName).getAll();
     req.onsuccess = () => resolve(req.result || []);
     req.onerror = () => reject(req.error);
+
+    // Fires if another tab has the DB open at an older version.
+    // Force-closes the connection so the upgrade can proceed.
+    req.onblocked = () => {
+      console.warn('[RAE] IDB upgrade blocked — close other tabs and reload');
+      // Don't reject — the user needs to close other tabs.
+      // Show a message if we can reach the DOM.
+      const app = document.getElementById('app');
+      if (app) {
+        app.innerHTML = `
+          <div style="display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column;gap:1rem;padding:2rem;text-align:center;">
+            <div style="color:#E8A84C;font-family:serif;font-size:1.1rem;">Close other tabs running RAE, then reload.</div>
+          </div>
+        `;
+      }
+    };
   });
 }
 
@@ -217,6 +281,22 @@ function idbDelete(storeName, id) {
     const req = tx.objectStore(storeName).delete(id);
     req.onsuccess = () => resolve();
     req.onerror = () => reject(req.error);
+
+    // Fires if another tab has the DB open at an older version.
+    // Force-closes the connection so the upgrade can proceed.
+    req.onblocked = () => {
+      console.warn('[RAE] IDB upgrade blocked — close other tabs and reload');
+      // Don't reject — the user needs to close other tabs.
+      // Show a message if we can reach the DOM.
+      const app = document.getElementById('app');
+      if (app) {
+        app.innerHTML = `
+          <div style="display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column;gap:1rem;padding:2rem;text-align:center;">
+            <div style="color:#E8A84C;font-family:serif;font-size:1.1rem;">Close other tabs running RAE, then reload.</div>
+          </div>
+        `;
+      }
+    };
   });
 }
 

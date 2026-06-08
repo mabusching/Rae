@@ -2,7 +2,7 @@
   "name": "Relational Alignment Engine",
   "short_name": "RAE",
   "description": "A private tool for mapping, designing, and maintaining the structure of your relationships.",
-  "start_url": "./",
+  "start_url": "/",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#0E0B08",

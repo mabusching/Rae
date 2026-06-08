@@ -1,40 +1,46 @@
-// sw.js
+/**
+ * sw.js — Service Worker for offline PWA support
+ *
+ * Paths are derived from self.location so this works correctly
+ * whether hosted at root (/) or a subdirectory (/rae/ on GitHub Pages).
+ */
 
 const CACHE_NAME = 'rae-v1';
 
-// 1. Identify the subdirectory path dynamically
-// If hosted at username.github.io/repository-name/sw.js, 
-// basePath becomes "/repository-name/"
-const basePath = self.location.pathname.substring(0, self.location.pathname.lastIndexOf('/') + 1);
+// Derive base path from SW location — handles both root and subdir hosting
+// e.g. https://user.github.io/rae/sw.js → base = '/rae'
+const SW_PATH = self.location.pathname;
+const BASE = SW_PATH.substring(0, SW_PATH.lastIndexOf('/'));
 
-// 2. Define assets strictly relative to the application structure (no leading slashes)
-const RELATIVE_ASSETS = [
-  '',
-  'index.html',
-  'manifest.json',
-  'styles/base.css',
-  'styles/survey.css',
-  'styles/dashboard.css',
-  'lib/qrcode.min.js',
-  'lib/jsQR.min.js',
-  'src/crypto.js',
-  'src/storage.js',
-  'src/domains.js',
-  'src/identity.js',
-  'src/divergence.js',
-  'src/webrtc.js',
-  'src/ui/app.js',
-  'src/ui/onboarding.js',
-  'src/ui/dashboard.js',
-  'src/ui/survey.js',
-  'src/ui/pass3.js',
-  'src/ui/connect.js',
+function url(path) {
+  return BASE + path;
+}
+
+const STATIC_ASSETS = [
+  BASE + '/',
+  url('/index.html'),
+  url('/manifest.json'),
+  url('/styles/base.css'),
+  url('/styles/survey.css'),
+  url('/styles/dashboard.css'),
+  url('/lib/qrcode.min.js'),
+  url('/lib/jsQR.min.js'),
+  url('/src/crypto.js'),
+  url('/src/storage.js'),
+  url('/src/domains.js'),
+  url('/src/identity.js'),
+  url('/src/divergence.js'),
+  url('/src/webrtc.js'),
+  url('/src/ui/app.js'),
+  url('/src/ui/onboarding.js'),
+  url('/src/ui/dashboard.js'),
+  url('/src/ui/survey.js'),
+  url('/src/ui/pass3.js'),
+  url('/src/ui/connect.js'),
 ];
 
-// 3. Map the assets to the dynamic base path so cache.addAll gets the absolute URLs it requires
-const STATIC_ASSETS = RELATIVE_ASSETS.map(asset => `${basePath}${asset}`);
-
 // ── INSTALL ───────────────────────────────────────────────────────────────────
+
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
@@ -43,9 +49,27 @@ self.addEventListener('install', (event) => {
   );
 });
 
+// ── ACTIVATE ──────────────────────────────────────────────────────────────────
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches.keys().then((cacheNames) => {
+      return Promise.all(
+        cacheNames
+          .filter(name => name !== CACHE_NAME)
+          .map(name => caches.delete(name))
+      );
+    }).then(() => self.clients.claim())
+  );
+});
+
 // ── FETCH ─────────────────────────────────────────────────────────────────────
+
 self.addEventListener('fetch', (event) => {
+  // Only handle same-origin requests
   if (!event.request.url.startsWith(self.location.origin)) return;
+
+  // Skip non-GET requests
   if (event.request.method !== 'GET') return;
 
   event.respondWith(
@@ -61,9 +85,9 @@ self.addEventListener('fetch', (event) => {
         }
         return response;
       }).catch(() => {
-        // Use the dynamic fallback path for navigation requests
+        // Offline fallback for navigation requests
         if (event.request.mode === 'navigate') {
-          return caches.match(`${basePath}index.html`);
+          return caches.match(url('/index.html'));
         }
       });
     })
