@@ -5,7 +5,7 @@
  * whether hosted at root (/) or a subdirectory (/rae/ on GitHub Pages).
  */
 
-const CACHE_NAME = 'rae-v1';
+const CACHE_NAME = 'rae-v2';
 
 // Derive base path from SW location — handles both root and subdir hosting
 // e.g. https://user.github.io/rae/sw.js → base = '/rae'
@@ -37,6 +37,7 @@ const STATIC_ASSETS = [
   url('/src/ui/survey.js'),
   url('/src/ui/pass3.js'),
   url('/src/ui/connect.js'),
+  url('/src/ui/ideal.js'),
   url('/icons/icon-192.png'),
   url('/icons/icon-512.png'),
 ];

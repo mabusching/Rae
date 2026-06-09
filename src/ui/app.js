@@ -3,8 +3,9 @@
  * Handles routing, global state, and view orchestration
  */
 
-import { initDB, loadKeyMeta, hasKeyMeta, loadIdentity, isUnlocked, loadAllRelationships, loadAndActivateKeypair } from '../storage.js';
+import { initDB, hasKeyMeta, loadIdentity, isUnlocked, loadAllRelationships, loadAndActivateKeypair } from '../storage.js';
 import { renderOnboarding } from './onboarding.js';
+import { renderIdeal } from './ideal.js';
 import { renderDashboard } from './dashboard.js';
 import { renderSurvey } from './survey.js';
 import { renderConnect } from './connect.js';
@@ -61,6 +62,11 @@ async function render() {
     case 'pass3':
       app.innerHTML = '';
       app.appendChild(await renderPass3());
+      break;
+
+    case 'ideal':
+      app.innerHTML = '';
+      app.appendChild(await renderIdeal());
       break;
   }
 }

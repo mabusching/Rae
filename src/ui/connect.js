@@ -149,7 +149,7 @@ async function renderShowQR(container) {
       identicon: state.identity.identicon,
     });
 
-    const qrData = serializeForQR(offerPayload);
+    const qrData = await serializeForQR(offerPayload);
     await renderQRCode(container.querySelector('#qr-wrap'), qrData);
 
     container.querySelector('#qr-status').textContent = 'Ready to scan';
@@ -221,7 +221,7 @@ async function renderScanQR(container) {
   await startCameraAndScan(container, async (data) => {
     stopCamera();
     try {
-      const offerPayload = deserializeFromQR(data);
+      const offerPayload = await deserializeFromQR(data);
       if (offerPayload.type !== 'rae-offer') { toast('Not a valid RAE calling card'); return; }
 
       container.querySelector('#scan-status').textContent = 'Offer received — generating answer...';
@@ -233,7 +233,7 @@ async function renderScanQR(container) {
         identicon: state.identity.identicon,
       });
 
-      const answerQRData = serializeForQR(answerPayload);
+      const answerQRData = await serializeForQR(answerPayload);
       container.querySelector('#answer-qr-section').style.display = 'block';
       await renderQRCode(container.querySelector('#answer-qr-wrap'), answerQRData);
 
@@ -278,7 +278,7 @@ async function renderScanAnswer(container, offerPayload) {
   await startCameraAndScan(container, async (data) => {
     stopCamera();
     try {
-      const answerPayload = deserializeFromQR(data);
+      const answerPayload = await deserializeFromQR(data);
       if (answerPayload.type !== 'rae-answer') { toast('Not a valid answer QR'); return; }
 
       section.querySelector('#scan-status').textContent = 'Answer received — connecting...';
@@ -490,7 +490,7 @@ async function renderQRCode(container, data) {
       width: 240,
       margin: 2,
       color: { dark: '#1A1410', light: '#FFFFFF' },
-      errorCorrectionLevel: 'M',
+      errorCorrectionLevel: 'L',  // L=7% recovery — sufficient for face-to-face scan, produces smaller QR
     });
     container.innerHTML = '';
     const wrap = document.createElement('div');

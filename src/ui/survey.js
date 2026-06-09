@@ -2,23 +2,61 @@
  * survey.js — Pass 1 and Pass 2 survey interfaces
  */
 
-import { DOMAINS, CATEGORIES, X_LABELS, Y_LABELS, Z_LABELS, getDomainsByCategory } from '../domains.js';
-import { saveSession, loadLatestSession, saveRelationship, loadRelationship, createEmptySession } from '../storage.js';
+import { DOMAINS, CATEGORIES, X_LABELS, Y_LABELS, Z_LABELS, Z_BINARY_STATEMENT, Z_CONCENTRATED, Z_DISPERSED, getDomainsByCategory } from '../domains.js';
+import { saveSession, loadLatestSession, saveRelationship, loadRelationship, createEmptySession, loadIdealProfile } from '../storage.js';
 import { state, navigate, toast, renderNav } from './app.js';
 
 export async function renderSurvey(pass = 1) {
   const wrap = document.createElement('div');
 
-  // Load or create session
+  // ── Pass 1 requires an active connection ──────────────────────────────────
+  if (pass === 1 && !state.activeRelationshipId) {
+    const content = document.createElement('div');
+    content.className = 'page';
+    content.innerHTML = `
+      <div style="padding-top:3rem;" class="stack stack-xl text-center fade-in">
+        <div style="font-size:2rem;">🔗</div>
+        <div class="display display-sm">Connection Required</div>
+        <p style="font-family:var(--font-serif);font-style:italic;color:var(--text-muted);font-size:0.9rem;line-height:1.6;">
+          Pass 1 maps the current state of a specific relationship.
+          Connect with a partner first, then return here.
+        </p>
+        <button class="btn btn-outline" id="go-connect">Go to Connect →</button>
+      </div>
+    `;
+    wrap.appendChild(content);
+    const _nav = document.createElement('div');
+    _nav.innerHTML = renderNav('survey');
+    wrap.appendChild(_nav);
+    setTimeout(() => {
+      content.querySelector('#go-connect').addEventListener('click', async () => {
+        await navigate('connect');
+      });
+      bindNavEvents(wrap);
+    }, 0);
+    return wrap;
+  }
+
+  // ── Load or create session ─────────────────────────────────────────────────
   let session = null;
   if (state.activeRelationshipId) {
     session = await loadLatestSession(state.activeRelationshipId);
   }
   if (!session) {
-    session = createEmptySession(state.activeRelationshipId || 'standalone');
+    session = createEmptySession(state.activeRelationshipId);
     state.activeSession = session;
   } else {
     state.activeSession = session;
+  }
+
+  // ── Pass 2 seed prompt — show once if ideal exists and pass2 not started ──
+  const idealProfile = await loadIdealProfile();
+  const pass2NotStarted = pass === 2 &&
+    session.pass2Seeded === null &&
+    DOMAINS.every(d => !session.domains[d.id]?.pass2);
+
+  if (pass2NotStarted && idealProfile) {
+    return renderSeedPrompt(wrap, session, idealProfile);
   }
 
   const relationship = state.activeRelationshipId
@@ -30,11 +68,10 @@ export async function renderSurvey(pass = 1) {
   const content = document.createElement('div');
   content.className = 'page-wide';
 
-  // Header
   content.innerHTML = `
     <div class="pass-header">
       <div>
-        <div class="label">Pass ${pass} of 3</div>
+        <div class="label">Pass ${pass} of 3 · ${relationship?.partnerAlias || 'New Connection'}</div>
         <div class="display display-sm" style="margin-top:0.25rem;">
           ${pass === 1 ? 'Current State' : 'Aspirational Design'}
         </div>
@@ -43,8 +80,8 @@ export async function renderSurvey(pass = 1) {
     </div>
     <p style="font-family:var(--font-serif);font-style:italic;color:var(--text-muted);font-size:0.9rem;line-height:1.6;margin-bottom:2rem;">
       ${pass === 1
-        ? 'Answer independently and honestly. Your partner\'s responses are private until both of you have signed off.'
-        : 'Imagine designing this relationship from scratch, with full intentionality. Where would you want each domain to be?'}
+        ? "Answer independently and honestly. Your partner's responses are private until both of you have signed off."
+        : 'Where do you want this specific relationship to go? This is context-aware — it may differ from your Ideal.'}
     </p>
     <div id="domains-container" class="stack stack-md"></div>
     <div id="signoff-section" style="margin-top:2rem;"></div>
@@ -59,6 +96,80 @@ export async function renderSurvey(pass = 1) {
     buildDomainCards(content, session, pass, edgesUnlocked, relationship);
     updateCompletionCount(content, session, pass);
     buildSignoffSection(content, session, pass, relationship);
+    bindNavEvents(wrap);
+  }, 0);
+
+  return wrap;
+}
+
+// ── SEED PROMPT ───────────────────────────────────────────────────────────────
+
+function renderSeedPrompt(wrap, session, idealProfile) {
+  const content = document.createElement('div');
+  content.className = 'page';
+  content.innerHTML = `
+    <div style="padding-top:3rem;" class="stack stack-xl fade-in">
+      <div>
+        <div class="label" style="margin-bottom:0.25rem;">Pass 2 · Starting Point</div>
+        <div class="display display-sm">Seed from My Ideal?</div>
+        <p style="font-family:var(--font-serif);font-style:italic;color:var(--text-muted);font-size:0.9rem;line-height:1.6;margin-top:0.75rem;">
+          You have a saved Ideal profile. You can use it as a starting point for this relationship's Pass 2 and adjust from there — or begin completely fresh.
+        </p>
+      </div>
+
+      <div class="card" style="cursor:pointer;border-color:rgba(232,168,76,0.3);" id="seed-ideal-btn">
+        <div class="stack stack-sm">
+          <div style="font-size:0.92rem;font-weight:500;">Start from My Ideal</div>
+          <div style="font-family:var(--font-mono);font-size:0.72rem;color:var(--text-muted);">
+            Pre-fills all sliders with your ideal values. Adjust for this specific relationship.
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="cursor:pointer;" id="seed-blank-btn">
+        <div class="stack stack-sm">
+          <div style="font-size:0.92rem;">Begin blank</div>
+          <div style="font-family:var(--font-mono);font-size:0.72rem;color:var(--text-muted);">
+            All sliders start at midpoint. No assumptions carried in.
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  wrap.appendChild(content);
+  const _nav = document.createElement('div');
+  _nav.innerHTML = renderNav('survey');
+  wrap.appendChild(_nav);
+
+  setTimeout(() => {
+    content.querySelector('#seed-ideal-btn').addEventListener('click', async () => {
+      // Copy ideal profile values into session pass2
+      DOMAINS.forEach(d => {
+        const idealDomain = idealProfile.domains?.[d.id];
+        if (idealDomain) {
+          session.domains[d.id].pass2 = {
+            x: idealDomain.x || 3,
+            zBinary: idealDomain.zBinary || 'yes',
+            zScale: idealDomain.zScale || null,
+          };
+        }
+      });
+      session.pass2Seeded = 'ideal';
+      session.updatedAt = Date.now();
+      await saveSession(session);
+      state.activeSession = session;
+      await navigate('survey', { currentPass: 2 });
+    });
+
+    content.querySelector('#seed-blank-btn').addEventListener('click', async () => {
+      session.pass2Seeded = 'blank';
+      session.updatedAt = Date.now();
+      await saveSession(session);
+      state.activeSession = session;
+      await navigate('survey', { currentPass: 2 });
+    });
+
     bindNavEvents(wrap);
   }, 0);
 
@@ -227,7 +338,8 @@ function buildPassQuestions(domain, passData, pass) {
   } else {
     // Pass 2
     const xVal = passData?.x || 3;
-    const zBinary = passData?.zBinary || null;
+    // Default zBinary to 'yes' — unique to this relationship unless explicitly changed
+    const zBinary = passData?.zBinary ?? 'yes';
     const zScale = passData?.zScale || 3;
 
     return `
@@ -243,29 +355,42 @@ function buildPassQuestions(domain, passData, pass) {
         </div>
       </div>
       <div class="question-block">
-        <div class="question-axis">Z · Exclusivity</div>
-        <div class="question-text">${domain.zQuestion}</div>
-        <div class="z-binary-group">
-          <div class="z-binary-label">Should this domain be exclusive to this relationship?</div>
-          <div class="z-binary-options">
-            <button class="z-opt ${zBinary === 'yes' ? 'selected-yes' : ''}" data-z="yes" id="z-yes-${domain.id}">Exclusive</button>
-            <button class="z-opt ${zBinary === 'no' ? 'selected-no' : ''}" data-z="no" id="z-no-${domain.id}">Open</button>
-            <button class="z-opt ${zBinary === 'complicated' ? 'selected-complicated' : ''}" data-z="complicated" id="z-comp-${domain.id}">Nuanced</button>
+        <div class="question-axis">Z · Structure</div>
+        <div class="question-text">${Z_BINARY_STATEMENT}</div>
+        <div class="z-binary-group" style="margin-bottom:0.75rem;">
+          <div class="z-binary-options" style="grid-template-columns:1fr 1fr;">
+            <button class="z-opt ${zBinary === 'yes' ? 'selected-yes' : ''}"
+              id="z-yes-${domain.id}">Yes</button>
+            <button class="z-opt ${zBinary === 'no' ? 'selected-no' : ''}"
+              id="z-no-${domain.id}">No</button>
           </div>
         </div>
-        <div id="z-scale-wrap-${domain.id}" style="${zBinary === 'yes' ? 'display:none;' : ''}">
-          <div class="slider-value" id="z-val-${domain.id}">${Z_LABELS[zScale]}</div>
+        <div id="z-scale-wrap-${domain.id}" style="${zBinary !== 'no' ? 'display:none;' : ''}">
+          <div class="slider-value" id="z-val-${domain.id}" style="font-size:0.72rem;color:var(--text-muted);">
+            ${zBinary === 'no' ? zScaleLabel(zScale) : ''}
+          </div>
           <div class="slider-wrap">
             <input type="range" min="1" max="5" step="1" value="${zScale}" id="z-slider-${domain.id}" data-axis="z">
             <div class="slider-labels">
-              <span class="label" style="font-size:0.55rem;">Open</span>
-              <span class="label" style="font-size:0.55rem;">Exclusive</span>
+              <span class="label" style="font-size:0.55rem;">${Z_CONCENTRATED}</span>
+              <span class="label" style="font-size:0.55rem;">${Z_DISPERSED}</span>
             </div>
           </div>
         </div>
       </div>
     `;
   }
+}
+
+function zScaleLabel(val) {
+  const labels = {
+    1: 'Concentrated — this relationship is primary',
+    2: 'Mostly concentrated',
+    3: 'Balanced across connections',
+    4: 'Mostly dispersed',
+    5: 'Dispersed — distributed broadly',
+  };
+  return labels[val] || '';
 }
 
 function wireSliders(card, domain, session, pass) {
@@ -296,35 +421,35 @@ function wireSliders(card, domain, session, pass) {
         });
       }
     } else {
-      // Z binary buttons
-      ['yes', 'no', 'complicated'].forEach(opt => {
-        const btn = card.querySelector(`#z-${opt === 'complicated' ? 'comp' : opt}-${domain.id}`);
+      // Z binary — Yes/No only, default is Yes
+      ['yes', 'no'].forEach(opt => {
+        const btn = card.querySelector(`#z-${opt}-${domain.id}`);
         if (!btn) return;
         btn.addEventListener('click', async () => {
-          // Clear all selected states
           card.querySelector(`#z-yes-${domain.id}`)?.classList.remove('selected-yes');
           card.querySelector(`#z-no-${domain.id}`)?.classList.remove('selected-no');
-          card.querySelector(`#z-comp-${domain.id}`)?.classList.remove('selected-complicated');
-
-          // Set selected
           btn.classList.add(`selected-${opt}`);
 
-          // Show/hide scale
           const scaleWrap = card.querySelector(`#z-scale-wrap-${domain.id}`);
-          if (scaleWrap) scaleWrap.style.display = opt === 'yes' ? 'none' : 'block';
+          if (scaleWrap) scaleWrap.style.display = opt === 'no' ? 'block' : 'none';
 
-          await updatePassData(session, domain.id, pass, { zBinary: opt });
+          // Selecting Yes clears the scale — unique means no distribution to measure
+          const updates = opt === 'yes'
+            ? { zBinary: 'yes', zScale: null }
+            : { zBinary: 'no' };
+
+          await updatePassData(session, domain.id, pass, updates);
           updateCard(card, domain, session, pass);
         });
       });
 
-      // Z scale slider
+      // Z scale slider — only relevant when No is selected
       const zSlider = card.querySelector(`#z-slider-${domain.id}`);
-      const zValEl = card.querySelector(`#z-val-${domain.id}`);
+      const zValEl  = card.querySelector(`#z-val-${domain.id}`);
       if (zSlider && zValEl) {
         zSlider.addEventListener('input', async () => {
           const val = parseInt(zSlider.value);
-          zValEl.textContent = Z_LABELS[val];
+          zValEl.textContent = zScaleLabel(val);
           await updatePassData(session, domain.id, pass, { zScale: val });
         });
       }
@@ -337,7 +462,7 @@ async function updatePassData(session, domainId, pass, updates) {
   const key = pass === 1 ? 'pass1' : 'pass2';
 
   if (!domainData[key]) {
-    domainData[key] = pass === 1 ? { x: 3, y: 3 } : { x: 3, zBinary: null, zScale: 3 };
+    domainData[key] = pass === 1 ? { x: 3, y: 3 } : { x: 3, zBinary: 'yes', zScale: null };
   }
 
   Object.assign(domainData[key], updates);

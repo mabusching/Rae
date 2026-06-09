@@ -50,12 +50,12 @@ export async function createOffer(identity) {
   await waitForICE(_pc);
 
   // identity.publicKey is already base64 — stored that way in the identity record
+  // identicon is intentionally excluded — receiver derives it from the public key
   return {
     type: 'rae-offer',
     sdp: _pc.localDescription.sdp,
     publicKey: identity.publicKey,
     alias: identity.alias,
-    identicon: identity.identicon,
   };
 }
 
@@ -65,10 +65,10 @@ export async function createOffer(identity) {
 export async function receiveAnswer(answerPayload) {
   const desc = new RTCSessionDescription({ type: 'answer', sdp: answerPayload.sdp });
   await _pc.setRemoteDescription(desc);
+  // identicon derived from publicKey on receiving end — not transmitted
   return {
     publicKey: answerPayload.publicKey,
     alias: answerPayload.alias,
-    identicon: answerPayload.identicon,
   };
 }
 
@@ -95,13 +95,12 @@ export async function receiveOfferAndAnswer(offerPayload, identity) {
 
   await waitForICE(_pc);
 
-  // identity.publicKey is already base64 — stored that way in the identity record
+  // identicon intentionally excluded — receiver derives it from the public key
   return {
     type: 'rae-answer',
     sdp: _pc.localDescription.sdp,
     publicKey: identity.publicKey,
     alias: identity.alias,
-    identicon: identity.identicon,
     offerPublicKey: offerPayload.publicKey,
   };
 }
@@ -266,15 +265,64 @@ export function closeConnection() {
 }
 
 // ── QR PAYLOAD SERIALIZATION ──────────────────────────────────────────────────
+//
+// Compression pipeline: JSON → deflate-raw → base64
+// Reduces a typical 700-char SDP payload to ~300 chars → Version 10 QR, easy scan.
+// identicon is never included — receiver derives it deterministically from publicKey.
+// Falls back to plain JSON if CompressionStream is unavailable.
 
-/**
- * Serialize a WebRTC offer/answer to a compact JSON string for QR encoding
- * SDP can be large — we truncate non-essential lines
- */
-export function serializeForQR(payload) {
-  return JSON.stringify(payload);
+export async function serializeForQR(payload) {
+  const json = JSON.stringify(payload);
+  try {
+    const compressed = await deflate(json);
+    // Prefix 'z:' so the receiver knows to decompress
+    return 'z:' + compressed;
+  } catch {
+    // Fallback: uncompressed plain JSON
+    return json;
+  }
 }
 
-export function deserializeFromQR(str) {
+export async function deserializeFromQR(str) {
+  if (str.startsWith('z:')) {
+    const json = await inflate(str.slice(2));
+    return JSON.parse(json);
+  }
   return JSON.parse(str);
+}
+
+async function deflate(str) {
+  const input = new TextEncoder().encode(str);
+  const cs = new CompressionStream('deflate-raw');
+  const writer = cs.writable.getWriter();
+  writer.write(input);
+  writer.close();
+  const chunks = [];
+  const reader = cs.readable.getReader();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+  }
+  const total = chunks.reduce((n, c) => n + c.length, 0);
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) { merged.set(chunk, offset); offset += chunk.length; }
+  // Use base64url (no +/= padding issues in QR alphanumeric mode)
+  return btoa(String.fromCharCode(...merged))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+}
+
+async function inflate(b64url) {
+  // Restore standard base64
+  const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = b64 + '==='.slice(0, (4 - b64.length % 4) % 4);
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  const ds = new DecompressionStream('deflate-raw');
+  const writer = ds.writable.getWriter();
+  writer.write(bytes);
+  writer.close();
+  return new Response(ds.readable).text();
 }

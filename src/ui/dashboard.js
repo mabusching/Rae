@@ -250,13 +250,13 @@ function showRelationshipOptions(rel, card) {
 function renderStandaloneSection(container) {
   if (!container) return;
   container.innerHTML = `
-    <div class="label" style="margin-bottom:0.75rem;">Absolute Profile</div>
-    <div class="card" style="cursor:pointer;" id="abs-profile-btn">
+    <div class="label" style="margin-bottom:0.75rem;">My Ideal</div>
+    <div class="card" style="cursor:pointer;" id="ideal-btn">
       <div style="display:flex;align-items:center;justify-content:space-between;">
         <div>
-          <div style="font-size:0.88rem;margin-bottom:0.2rem;">Pass 2 — Aspirational Design</div>
+          <div style="font-size:0.88rem;margin-bottom:0.2rem;">Your Unconstrained Design</div>
           <div style="font-family:var(--font-mono);font-size:0.7rem;color:var(--text-muted);">
-            Your standing discovery profile · Used for new connections
+            Internal only · Never shared · Seeds Pass 2 in new connections
           </div>
         </div>
         <span style="color:var(--text-muted);font-size:1.2rem;">→</span>
@@ -264,10 +264,8 @@ function renderStandaloneSection(container) {
     </div>
   `;
 
-  container.querySelector('#abs-profile-btn').addEventListener('click', async () => {
-    state.activeRelationshipId = null;
-    state.activeSession = null;
-    await navigate('survey', { currentPass: 2 });
+  container.querySelector('#ideal-btn').addEventListener('click', async () => {
+    await navigate('ideal');
   });
 }
 
