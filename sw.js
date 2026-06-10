@@ -30,6 +30,7 @@ const STATIC_ASSETS = [
   url('/src/domains.js'),
   url('/src/identity.js'),
   url('/src/divergence.js'),
+  url('/src/qrTransport.js'),
   url('/src/ui/app.js'),
   url('/src/ui/onboarding.js'),
   url('/src/ui/dashboard.js'),
