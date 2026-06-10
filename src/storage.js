@@ -10,7 +10,7 @@
 import { encrypt, decrypt } from './crypto.js';
 
 const DB_NAME = 'rae_v1';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 let _db = null;
 let _encKey = null;
