@@ -5,7 +5,7 @@
  * whether hosted at root (/) or a subdirectory (/rae/ on GitHub Pages).
  */
 
-const CACHE_NAME = 'rae-v5';
+const CACHE_NAME = 'rae-v6';
 
 // Derive base path from SW location — handles both root and subdir hosting
 // e.g. https://user.github.io/rae/sw.js → base = '/rae'
