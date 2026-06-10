@@ -145,26 +145,52 @@ function iconConnect() {
 
 // ── BOOT SEQUENCE ──────────────────────────────────────────────────────────────
 
+// ── BOOT SEQUENCE ──────────────────────────────────────────────────────────────
+
 export async function boot() {
-  await initDB();
-  const hasMeta = await hasKeyMeta();
+  try {
+    await initDB();
+    const hasMeta = await hasKeyMeta();
 
-  if (!hasMeta) {
-    // First launch — go to onboarding
-    await navigate('onboarding');
-    return;
+    if (!hasMeta) {
+      // First launch — go straight to onboarding
+      await navigate('onboarding');
+      return;
+    }
+
+    if (!isUnlocked()) {
+      // Identity exists but keys remain encrypted inside local storage
+      state.identity = null;
+      state.relationships = [];
+      await navigate('onboarding', { step: 'unlock' });
+      return;
+    }
+
+    // Fully unlocked state recovery
+    state.identity = await loadIdentity();
+    
+    // Explicitly seed memory maps before initializing component views
+    const activeKeys = await loadAndActivateKeypair();
+    if (!activeKeys) {
+      console.warn("Asymmetric key storage uninitialized. Forcing re-authentication.");
+      await navigate('onboarding', { step: 'unlock' });
+      return;
+    }
+
+    state.relationships = await loadAllRelationships();
+    await navigate('dashboard');
+
+  } catch (error) {
+    console.error("Critical core engine boot failure:", error);
+    toast("Initialization failure. Check database persistence properties.");
+    // Fail closed to fallback gate
+    state.currentView = 'loading';
+    document.getElementById('app').innerHTML = `
+      <div style="padding:2rem; text-align:center; font-family:var(--font-mono); font-size:0.8rem;">
+        <div style="font-size:2rem; margin-bottom:1rem;">⚠️</div>
+        <div>ENGINE_INIT_STALL</div>
+        <div style="color:var(--text-muted); margin-top:0.5rem;">${error.message}</div>
+      </div>
+    `;
   }
-
-  if (!isUnlocked()) {
-    // Has identity but not unlocked — show PIN entry
-    await navigate('onboarding', { step: 'unlock' });
-    return;
-  }
-
-  // Fully unlocked (e.g. hot-reload during development)
-  // Load identity and keypair into memory
-  state.identity = await loadIdentity();
-  await loadAndActivateKeypair();
-  state.relationships = await loadAllRelationships();
-  await navigate('dashboard');
 }
