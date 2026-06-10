@@ -515,11 +515,31 @@ async function savePartnerSessionData(partnerData) {
   }
   state.partnerSession = partnerData.session;
 
-  // Update last sync time on relationship
   if (state.activeRelationshipId) {
     const rel = await loadRelationship(state.activeRelationshipId);
     if (rel) {
       rel.lastSyncAt = Date.now();
+
+      // Mutual Edges unlock — both partners must have flagged it
+      const mySession = state.activeSession;
+      const theirSession = partnerData.session;
+      if (
+        !rel.edgesUnlocked &&
+        mySession?.edgesUnlockRequested &&
+        theirSession?.edgesUnlockRequested
+      ) {
+        rel.edgesUnlocked = true;
+        toast('✓ Edges unlocked — both partners confirmed');
+      }
+
+      // Merge their signoffs into our session so we see their status
+      if (mySession && theirSession?.signoffs) {
+        mySession.signoffs.pass1.theirs = theirSession.signoffs?.pass1?.mine || false;
+        mySession.signoffs.pass2.theirs = theirSession.signoffs?.pass2?.mine || false;
+        mySession.updatedAt = Date.now();
+        await saveSession(mySession);
+      }
+
       await saveRelationship(rel);
     }
   }

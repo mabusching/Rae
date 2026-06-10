@@ -267,7 +267,8 @@ export function createEmptySession(relationshipId) {
   return {
     id: `session_${relationshipId}_${Date.now()}`,
     relationshipId,
-    pass2Seeded: null, // null | 'ideal' | 'blank' — tracks seeding choice
+    pass2Seeded: null,          // null | 'ideal' | 'blank' — tracks seeding choice
+    edgesUnlockRequested: false, // set to true when this partner wants mutual Edges unlock
     signoffs: {
       pass1: { mine: false, theirs: false },
       pass2: { mine: false, theirs: false },

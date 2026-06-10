@@ -2,7 +2,7 @@
  * survey.js — Pass 1 and Pass 2 survey interfaces
  */
 
-import { DOMAINS, CATEGORIES, X_LABELS, Y_LABELS, Z_LABELS, Z_BINARY_STATEMENT, Z_CONCENTRATED, Z_DISPERSED, getDomainsByCategory } from '../domains.js';
+import { DOMAINS, CATEGORIES, X_LABELS, Y_LABELS, Z_LABELS, Z_BINARY_STATEMENT, Z_CONCENTRATED, Z_DISPERSED, getDomainsByCategory, isEdgesDomain } from '../domains.js';
 import { saveSession, loadLatestSession, saveRelationship, loadRelationship, createEmptySession, loadIdealProfile } from '../storage.js';
 import { state, navigate, toast, renderNav } from './app.js';
 
@@ -94,8 +94,8 @@ export async function renderSurvey(pass = 1) {
 
   setTimeout(() => {
     buildDomainCards(content, session, pass, edgesUnlocked, relationship);
-    updateCompletionCount(content, session, pass);
-    buildSignoffSection(content, session, pass, relationship);
+    updateCompletionCount(content, session, pass, edgesUnlocked);
+    buildSignoffSection(content, session, pass, relationship, edgesUnlocked);
     bindNavEvents(wrap);
   }, 0);
 
@@ -210,8 +210,19 @@ function buildDomainCards(container, session, pass, edgesUnlocked, relationship)
       `;
 
       if (relationship) {
-        section.querySelector('#request-unlock-btn')?.addEventListener('click', () => {
-          toast('Unlock request sent to your partner');
+        section.querySelector('#request-unlock-btn')?.addEventListener('click', async () => {
+          const sess = state.activeSession;
+          if (sess) {
+            sess.edgesUnlockRequested = true;
+            sess.updatedAt = Date.now();
+            await saveSession(sess);
+          }
+          const btn = section.querySelector('#request-unlock-btn');
+          if (btn) {
+            btn.textContent = '✓ Unlock requested';
+            btn.disabled = true;
+          }
+          toast('Edges unlock flagged — sync with your partner to confirm mutually.');
         });
       }
     } else {
@@ -496,27 +507,32 @@ function updateCard(card, domain, session, pass) {
 
 // ── COMPLETION COUNT ──────────────────────────────────────────────────────────
 
-function updateCompletionCount(container, session, pass) {
+function updateCompletionCount(container, session, pass, edgesUnlocked = false) {
   const countEl = container.querySelector('#completion-count');
   if (!countEl) return;
 
-  const total = DOMAINS.length;
-  const done = DOMAINS.filter(d => {
+  // Locked Edges domains are excluded from required completion —
+  // they can't be answered until mutually unlocked
+  const required = DOMAINS.filter(d => !(isEdgesDomain(d.id) && !edgesUnlocked));
+  const total = required.length;
+  const done = required.filter(d => {
     if (session.domains[d.id].notApplicable) return true;
     const data = pass === 1 ? session.domains[d.id].pass1 : session.domains[d.id].pass2;
     return isPassComplete(d, data, pass);
   }).length;
 
-  countEl.textContent = `${done} / ${total}`;
+  const lockedCount = DOMAINS.length - required.length;
+  countEl.textContent = lockedCount > 0
+    ? `${done} / ${total} (+ ${lockedCount} Edges locked)`
+    : `${done} / ${total}`;
 
-  // Update signoff button state
   const signoffBtn = container.querySelector('#signoff-btn');
   if (signoffBtn) signoffBtn.disabled = done < total;
 }
 
 // ── SIGNOFF SECTION ───────────────────────────────────────────────────────────
 
-function buildSignoffSection(container, session, pass, relationship) {
+function buildSignoffSection(container, session, pass, relationship, edgesUnlocked = false) {
   const section = container.querySelector('#signoff-section');
   if (!section) return;
 
@@ -600,7 +616,7 @@ function buildSignoffSection(container, session, pass, relationship) {
     session.updatedAt = Date.now();
     if (session.relationshipId && session.relationshipId !== 'standalone') await saveSession(session);
     toast('Sign-off recorded');
-    buildSignoffSection(container, session, pass, relationship);
+    buildSignoffSection(container, session, pass, relationship, edgesUnlocked);
   });
 }
 
