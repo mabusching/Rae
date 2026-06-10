@@ -1,12 +1,21 @@
 /**
- * connect.js — QR handshake, WebRTC connection, partner sync
+ * connect.js — Two-round QR-based connection
+ *
+ * Round 1 — Identity exchange (tiny ~110 char QR, any camera):
+ *   Each partner: show own identity QR → scan partner's identity QR
+ *   Result: both devices independently derive the same ECDH shared key
+ *
+ * Round 2 — Data exchange (encrypted ~400 char QR):
+ *   Each partner: show own encrypted session QR → scan partner's data QR
+ *   Result: partner session loaded, relationship synced
+ *
+ * No servers. No real-time channel. No signaling. Four scans total.
  */
 
 import {
-  createOffer, receiveAnswer, receiveOfferAndAnswer,
-  sendPayload, decryptPayload, closeConnection,
-  setMessageHandler, setStateChangeHandler,
-  serializeForQR, deserializeFromQR,
+  buildIdentityQR, parseIdentityQR,
+  buildDataQR, parseDataQR,
+  deriveSharedKeyFromPartner,
 } from '../webrtc.js';
 import {
   saveRelationship, loadRelationship, loadAllRelationships,
@@ -17,21 +26,38 @@ import { hashPublicKey } from '../crypto.js';
 import { generateIdenticon, svgToDataURL, shortFingerprint } from '../identity.js';
 import { state, navigate, toast, renderNav } from './app.js';
 
+// ── MODULE STATE ──────────────────────────────────────────────────────────────
+// Cleared at the start of each new connection session
+
+let _sharedKey       = null;  // AES-GCM key derived after identity exchange
+let _partnerPublicKey = null; // base64 string
+let _partnerAlias    = '';
+let _stream          = null;  // camera stream
+let _scanInterval    = null;  // QR scan interval
+
+function resetConnectionState() {
+  _sharedKey        = null;
+  _partnerPublicKey = null;
+  _partnerAlias     = '';
+  stopCamera();
+}
+
+// ── ENTRY POINT ───────────────────────────────────────────────────────────────
+
 export async function renderConnect() {
+  resetConnectionState();
   const wrap = document.createElement('div');
 
   const content = document.createElement('div');
   content.className = 'page';
-
   content.innerHTML = `
     <div style="margin-bottom:2rem;">
       <div class="label" style="margin-bottom:0.25rem;">Connect</div>
       <div class="display display-sm">Partner Sync</div>
       <p style="font-family:var(--font-serif);font-style:italic;color:var(--text-muted);font-size:0.9rem;line-height:1.6;margin-top:0.5rem;">
-        Establish a direct encrypted connection with your partner to exchange pass data or sync agreements.
+        Two rounds of QR scans. No servers, no accounts, no internet required.
       </p>
     </div>
-
     <div id="connect-body"></div>
   `;
 
@@ -41,389 +67,428 @@ export async function renderConnect() {
   wrap.appendChild(_nav);
 
   setTimeout(() => {
-    renderConnectOptions(content.querySelector('#connect-body'));
+    renderRound1Options(content.querySelector('#connect-body'));
     bindNavEvents(wrap);
   }, 0);
 
   return wrap;
 }
 
-// ── CONNECT OPTIONS ───────────────────────────────────────────────────────────
+// ── ROUND 1: IDENTITY EXCHANGE ────────────────────────────────────────────────
 
-function renderConnectOptions(container) {
-  container.innerHTML = `
-    <div class="stack stack-md">
-      <div class="card" style="cursor:pointer;" id="btn-show-qr">
-        <div style="display:flex;align-items:center;gap:1rem;">
-          <div style="font-size:2rem;">📲</div>
-          <div>
-            <div style="font-size:0.9rem;font-weight:400;margin-bottom:0.2rem;">Show My QR</div>
-            <div style="font-family:var(--font-mono);font-size:0.72rem;color:var(--text-muted);">
-              Generate a calling card for your partner to scan
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="card" style="cursor:pointer;" id="btn-scan-qr">
-        <div style="display:flex;align-items:center;gap:1rem;">
-          <div style="font-size:2rem;">📷</div>
-          <div>
-            <div style="font-size:0.9rem;font-weight:400;margin-bottom:0.2rem;">Scan Partner QR</div>
-            <div style="font-family:var(--font-mono);font-size:0.72rem;color:var(--text-muted);">
-              Open camera to scan your partner's calling card
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <hr class="divider" />
-
-      <div class="label" style="margin-bottom:0.5rem;">How it works</div>
-      <div class="card-sm stack stack-sm">
-        <div class="connection-step">
-          <div class="step-number">1</div>
-          <div class="step-content">
-            <div class="step-title">One partner shows their QR</div>
-            <div class="step-desc">Generates an encrypted calling card containing a WebRTC offer and public key.</div>
-          </div>
-        </div>
-        <div class="connection-step">
-          <div class="step-number">2</div>
-          <div class="step-content">
-            <div class="step-title">Other partner scans it</div>
-            <div class="step-desc">Camera reads the offer, generates an answer QR automatically.</div>
-          </div>
-        </div>
-        <div class="connection-step">
-          <div class="step-number">3</div>
-          <div class="step-content">
-            <div class="step-title">First partner scans the answer</div>
-            <div class="step-desc">Direct encrypted P2P channel opens. No data hits a server.</div>
-          </div>
-        </div>
-        <div class="connection-step">
-          <div class="step-number">4</div>
-          <div class="step-content">
-            <div class="step-title">Data syncs and channel closes</div>
-            <div class="step-desc">Pass data exchanges, agreements sync, connection terminates.</div>
-          </div>
-        </div>
-      </div>
-    </div>
-  `;
-
-  container.querySelector('#btn-show-qr').addEventListener('click', () => renderShowQR(container));
-  container.querySelector('#btn-scan-qr').addEventListener('click', () => renderScanQR(container));
-}
-
-// ── SHOW QR (initiator) ───────────────────────────────────────────────────────
-
-async function renderShowQR(container) {
-  container.innerHTML = `
-    <div class="stack stack-md">
-      <div style="display:flex;align-items:center;gap:1rem;margin-bottom:0.5rem;">
-        <button class="btn btn-ghost btn-sm" id="back-btn">← Back</button>
-        <div class="label">Your Calling Card</div>
-      </div>
-      <div id="qr-status" class="badge badge-neutral pulse">Generating...</div>
-      <div class="qr-container" id="qr-wrap"></div>
-      <p style="font-family:var(--font-mono);font-size:0.72rem;color:var(--text-muted);text-align:center;">
-        Ask your partner to scan this with their device.
-      </p>
-      <div id="step2-section" style="display:none;">
-        <hr class="divider" />
-        <div class="label" style="margin-bottom:0.75rem;">Step 2 — Scan Partner's Answer</div>
-        <button class="btn btn-primary btn-full" id="scan-answer-btn">Open Camera for Answer QR</button>
-      </div>
-      <div id="connection-status"></div>
-    </div>
-  `;
-
-  container.querySelector('#back-btn').addEventListener('click', () => renderConnectOptions(container));
-
-  try {
-    const offerPayload = await createOffer({
-      publicKey: getMyPublicKey(),
-      alias: state.identity.alias,
-      identicon: state.identity.identicon,
-    });
-
-    const qrData = await serializeForQR(offerPayload);
-    await renderQRCode(container.querySelector('#qr-wrap'), qrData);
-
-    container.querySelector('#qr-status').textContent = 'Ready to scan';
-    container.querySelector('#qr-status').className = 'badge badge-success';
-
-    // Show step 2 after a moment
-    setTimeout(() => {
-      container.querySelector('#step2-section').style.display = 'block';
-    }, 2000);
-
-    container.querySelector('#scan-answer-btn')?.addEventListener('click', () => {
-      renderScanAnswer(container, offerPayload);
-    });
-
-    // Set up connection state handler
-    setStateChangeHandler((connState) => {
-      const statusEl = container.querySelector('#connection-status');
-      if (!statusEl) return;
-      if (connState === 'channel-open') {
-        statusEl.innerHTML = `<div class="badge badge-success">🔗 Connected — exchanging data...</div>`;
-        handleConnectedAsInitiator(container);
-      } else if (connState === 'disconnected' || connState === 'failed') {
-        statusEl.innerHTML = `<div class="badge badge-danger">Connection lost</div>`;
-      }
-    });
-
-  } catch (err) {
-    container.querySelector('#qr-status').textContent = 'Error: ' + err.message;
-    container.querySelector('#qr-status').className = 'badge badge-danger';
+function renderRound1Options(container) {
+  const keypair = getActiveKeypair();
+  if (!keypair) {
+    container.innerHTML = `<div class="badge badge-danger">Keys not loaded — lock and unlock the app first.</div>`;
+    return;
   }
+
+  container.innerHTML = `
+    <div class="card" style="margin-bottom:1rem;">
+      <div class="label" style="margin-bottom:0.5rem;">Round 1 · Identity</div>
+      <p style="font-family:var(--font-serif);font-style:italic;color:var(--text-muted);font-size:0.85rem;line-height:1.6;margin-bottom:1.25rem;">
+        Exchange identity QRs with your partner. Either of you can go first.
+        These are tiny — readable by any camera.
+      </p>
+      <div class="stack stack-sm">
+        <button class="btn btn-primary btn-full" id="show-identity-btn">
+          Show My Identity QR
+        </button>
+        <button class="btn btn-outline btn-full" id="scan-identity-btn">
+          Scan Partner's QR First
+        </button>
+      </div>
+    </div>
+
+    <div class="card-sm" style="margin-top:0.75rem;">
+      <div class="label" style="margin-bottom:0.5rem;">Returning partners</div>
+      <div id="existing-relationships"></div>
+    </div>
+  `;
+
+  loadExistingRelationships(container.querySelector('#existing-relationships'));
+
+  container.querySelector('#show-identity-btn').addEventListener('click', () => {
+    renderShowIdentityQR(container);
+  });
+  container.querySelector('#scan-identity-btn').addEventListener('click', () => {
+    renderScanIdentityQR(container, false);
+  });
 }
 
-// ── SCAN QR (responder) ───────────────────────────────────────────────────────
+// Show own identity QR, then prompt to scan partner's
+async function renderShowIdentityQR(container, afterScan = false) {
+  const keypair = getActiveKeypair();
+  const identity = state.identity;
 
-async function renderScanQR(container) {
   container.innerHTML = `
     <div class="stack stack-md">
-      <div style="display:flex;align-items:center;gap:1rem;margin-bottom:0.5rem;">
+      <div class="row-between">
+        <div class="label">Round 1 · Your Identity QR</div>
         <button class="btn btn-ghost btn-sm" id="back-btn">← Back</button>
-        <div class="label">Scan Partner QR</div>
       </div>
       <p style="font-family:var(--font-serif);font-style:italic;color:var(--text-muted);font-size:0.85rem;">
-        Point your camera at your partner's calling card QR code.
+        Ask your partner to scan this with their camera.
+      </p>
+      <div id="identity-qr-wrap" class="qr-container"></div>
+      <div class="mono text-center" style="font-size:0.65rem;opacity:0.5;">
+        ${shortFingerprint(identity.keyHash)} · ${identity.alias}
+      </div>
+      <hr class="divider"/>
+      <div class="label" style="margin-bottom:0.5rem;">They scanned it? Now scan theirs:</div>
+      <button class="btn btn-primary btn-full" id="scan-their-btn">
+        Scan Partner's QR →
+      </button>
+    </div>
+  `;
+
+  container.querySelector('#back-btn').addEventListener('click', () => {
+    renderRound1Options(container);
+  });
+  container.querySelector('#scan-their-btn').addEventListener('click', () => {
+    renderScanIdentityQR(container, true);
+  });
+
+  // Generate and display identity QR
+  const qrStr = buildIdentityQR(identity.publicKey, identity.alias);
+  await renderQRCode(container.querySelector('#identity-qr-wrap'), qrStr);
+}
+
+// Scan partner's identity QR, then show own if we haven't yet
+async function renderScanIdentityQR(container, alreadyShownOwn) {
+  container.innerHTML = `
+    <div class="stack stack-md">
+      <div class="row-between">
+        <div class="label">Round 1 · Scan Partner QR</div>
+        <button class="btn btn-ghost btn-sm" id="back-btn">← Back</button>
+      </div>
+      <p style="font-family:var(--font-serif);font-style:italic;color:var(--text-muted);font-size:0.85rem;">
+        Point your camera at your partner's identity QR.
       </p>
       <div class="scan-viewfinder" id="viewfinder">
         <video id="scan-video" autoplay muted playsinline></video>
-        <div class="scan-overlay">
-          <div class="scan-frame"></div>
-        </div>
+        <div class="scan-overlay"><div class="scan-frame"></div></div>
       </div>
-      <div id="scan-status" class="badge badge-neutral pulse text-center">Waiting for camera...</div>
-      <div id="answer-qr-section" style="display:none;">
-        <hr class="divider"/>
-        <div class="label" style="margin-bottom:0.75rem;">Show this to your partner</div>
-        <div class="qr-container" id="answer-qr-wrap"></div>
-        <p style="font-family:var(--font-mono);font-size:0.72rem;color:var(--text-muted);text-align:center;">
-          Ask your partner to scan this answer QR on their device.
-        </p>
+      <div id="scan-status" class="badge badge-neutral pulse text-center">
+        Starting camera...
       </div>
-      <div id="connection-status"></div>
     </div>
   `;
 
   container.querySelector('#back-btn').addEventListener('click', () => {
     stopCamera();
-    renderConnectOptions(container);
+    if (alreadyShownOwn) renderShowIdentityQR(container);
+    else renderRound1Options(container);
   });
 
-  await startCameraAndScan(container, async (data) => {
+  startCameraAndScan(container, async (data) => {
     stopCamera();
+
+    const statusEl = container.querySelector('#scan-status');
+    if (statusEl) {
+      statusEl.textContent = 'Processing...';
+      statusEl.className = 'badge badge-warning';
+    }
+
     try {
-      const offerPayload = await deserializeFromQR(data);
-      if (offerPayload.type !== 'rae-offer') { toast('Not a valid RAE calling card'); return; }
+      const { publicKey, alias } = parseIdentityQR(data);
 
-      container.querySelector('#scan-status').textContent = 'Offer received — generating answer...';
-      container.querySelector('#scan-status').className = 'badge badge-warning';
+      // Derive shared key from ECDH
+      const keypair = getActiveKeypair();
+      _sharedKey        = await deriveSharedKeyFromPartner(keypair.privateKey, publicKey);
+      _partnerPublicKey = publicKey;
+      _partnerAlias     = alias;
 
-      const answerPayload = await receiveOfferAndAnswer(offerPayload, {
-        publicKey: getMyPublicKey(),
-        alias: state.identity.alias,
-        identicon: state.identity.identicon,
-      });
+      // Save partner relationship
+      await savePartnerFromKey(publicKey, alias);
 
-      const answerQRData = await serializeForQR(answerPayload);
-      container.querySelector('#answer-qr-section').style.display = 'block';
-      await renderQRCode(container.querySelector('#answer-qr-wrap'), answerQRData);
-
-      container.querySelector('#scan-status').textContent = 'Answer ready — waiting for connection';
-      container.querySelector('#scan-status').className = 'badge badge-success';
-      container.querySelector('#scan-status').classList.remove('pulse');
-
-      // Save partner info
-      await savePartnerFromPayload(offerPayload);
-
-      setStateChangeHandler((connState) => {
-        const statusEl = container.querySelector('#connection-status');
-        if (!statusEl) return;
-        if (connState === 'channel-open') {
-          statusEl.innerHTML = `<div class="badge badge-success">🔗 Connected — exchanging data...</div>`;
-          handleConnectedAsResponder(container);
-        }
-      });
-
+      if (!alreadyShownOwn) {
+        // They scanned first — now show them ours
+        renderShowIdentityQR(container, true);
+      } else {
+        // Both scanned — identity round complete
+        renderIdentityComplete(container);
+      }
     } catch (err) {
-      toast('Scan error: ' + err.message);
+      if (statusEl) {
+        statusEl.textContent = 'Error: ' + err.message;
+        statusEl.className = 'badge badge-danger';
+        statusEl.classList.remove('pulse');
+      }
     }
   });
 }
 
-// ── SCAN ANSWER (initiator step 2) ────────────────────────────────────────────
-
-async function renderScanAnswer(container, offerPayload) {
-  const section = document.createElement('div');
-  section.className = 'stack stack-md';
-  section.innerHTML = `
-    <div class="label">Scan Answer QR</div>
-    <div class="scan-viewfinder" id="viewfinder">
-      <video id="scan-video" autoplay muted playsinline></video>
-      <div class="scan-overlay"><div class="scan-frame"></div></div>
+function renderIdentityComplete(container) {
+  container.innerHTML = `
+    <div class="stack stack-md fade-in">
+      <div class="badge badge-success text-center" style="justify-content:center;">
+        ✓ Identity exchange complete
+      </div>
+      <div class="card-sm" style="display:flex;align-items:center;gap:0.75rem;">
+        <img
+          src="${svgToDataURL(generateIdenticon(
+            _partnerPublicKey ? _partnerPublicKey.slice(0, 32) : '0'.repeat(32)
+          ))}"
+          style="width:40px;height:40px;border-radius:6px;"
+        />
+        <div>
+          <div style="font-size:0.88rem;">${_partnerAlias}</div>
+          <div class="mono" style="font-size:0.65rem;color:var(--text-muted);">
+            Keys matched — shared secret established
+          </div>
+        </div>
+      </div>
+      <hr class="divider" style="margin:0.25rem 0;"/>
+      <div class="label" style="margin-bottom:0.25rem;">Round 2 · Data Exchange</div>
+      <p style="font-family:var(--font-serif);font-style:italic;color:var(--text-muted);font-size:0.85rem;line-height:1.6;">
+        Now exchange your session data. Each QR is encrypted with your shared key.
+      </p>
+      <button class="btn btn-primary btn-full" id="start-round2-btn">
+        Continue to Data Exchange →
+      </button>
     </div>
-    <div id="scan-status" class="badge badge-neutral pulse">Waiting for camera...</div>
   `;
 
-  container.querySelector('#step2-section').replaceWith(section);
+  container.querySelector('#start-round2-btn').addEventListener('click', () => {
+    renderRound2Options(container);
+  });
+}
 
-  await startCameraAndScan(container, async (data) => {
+// ── ROUND 2: DATA EXCHANGE ────────────────────────────────────────────────────
+
+function renderRound2Options(container) {
+  container.innerHTML = `
+    <div class="stack stack-md">
+      <div class="label" style="margin-bottom:0.25rem;">Round 2 · Data Exchange</div>
+      <p style="font-family:var(--font-serif);font-style:italic;color:var(--text-muted);font-size:0.85rem;line-height:1.6;">
+        Same pattern as Round 1. Either of you can go first.
+      </p>
+      <button class="btn btn-primary btn-full" id="show-data-btn">
+        Show My Data QR
+      </button>
+      <button class="btn btn-outline btn-full" id="scan-data-btn">
+        Scan Partner's Data First
+      </button>
+    </div>
+  `;
+
+  container.querySelector('#show-data-btn').addEventListener('click', () => {
+    renderShowDataQR(container);
+  });
+  container.querySelector('#scan-data-btn').addEventListener('click', () => {
+    renderScanDataQR(container, false);
+  });
+}
+
+async function renderShowDataQR(container, afterScan = false) {
+  container.innerHTML = `
+    <div class="stack stack-md">
+      <div class="row-between">
+        <div class="label">Round 2 · Your Data QR</div>
+        <button class="btn btn-ghost btn-sm" id="back-btn">← Back</button>
+      </div>
+      <p style="font-family:var(--font-serif);font-style:italic;color:var(--text-muted);font-size:0.85rem;">
+        Ask your partner to scan this. Your data is encrypted — only they can read it.
+      </p>
+      <div id="data-qr-status" class="badge badge-neutral pulse text-center">
+        Encrypting...
+      </div>
+      <div id="data-qr-wrap" class="qr-container"></div>
+      <hr class="divider"/>
+      <div class="label" style="margin-bottom:0.5rem;">They scanned it? Now scan theirs:</div>
+      <button class="btn btn-primary btn-full" id="scan-their-data-btn">
+        Scan Partner's Data →
+      </button>
+    </div>
+  `;
+
+  container.querySelector('#back-btn').addEventListener('click', () => {
+    if (afterScan) renderScanDataQR(container, true);
+    else renderRound2Options(container);
+  });
+  container.querySelector('#scan-their-data-btn').addEventListener('click', () => {
+    renderScanDataQR(container, true);
+  });
+
+  // Build and display data QR
+  try {
+    const sessionData = buildSessionPayload();
+    const qrStr = await buildDataQR(sessionData, _sharedKey);
+    const statusEl = container.querySelector('#data-qr-status');
+    if (statusEl) {
+      statusEl.textContent = `Encrypted · ${qrStr.length} chars`;
+      statusEl.className = 'badge badge-success';
+      statusEl.classList.remove('pulse');
+    }
+    await renderQRCode(container.querySelector('#data-qr-wrap'), qrStr);
+  } catch (err) {
+    const statusEl = container.querySelector('#data-qr-status');
+    if (statusEl) {
+      statusEl.textContent = 'Error: ' + err.message;
+      statusEl.className = 'badge badge-danger';
+    }
+  }
+}
+
+async function renderScanDataQR(container, alreadyShownOwn) {
+  container.innerHTML = `
+    <div class="stack stack-md">
+      <div class="row-between">
+        <div class="label">Round 2 · Scan Partner Data</div>
+        <button class="btn btn-ghost btn-sm" id="back-btn">← Back</button>
+      </div>
+      <p style="font-family:var(--font-serif);font-style:italic;color:var(--text-muted);font-size:0.85rem;">
+        Scan your partner's encrypted data QR.
+      </p>
+      <div class="scan-viewfinder" id="viewfinder">
+        <video id="scan-video" autoplay muted playsinline></video>
+        <div class="scan-overlay"><div class="scan-frame"></div></div>
+      </div>
+      <div id="scan-status" class="badge badge-neutral pulse text-center">
+        Starting camera...
+      </div>
+    </div>
+  `;
+
+  container.querySelector('#back-btn').addEventListener('click', () => {
     stopCamera();
+    if (alreadyShownOwn) renderShowDataQR(container, true);
+    else renderRound2Options(container);
+  });
+
+  startCameraAndScan(container, async (data) => {
+    stopCamera();
+    const statusEl = container.querySelector('#scan-status');
+    if (statusEl) {
+      statusEl.textContent = 'Decrypting...';
+      statusEl.className = 'badge badge-warning';
+    }
+
     try {
-      const answerPayload = await deserializeFromQR(data);
-      if (answerPayload.type !== 'rae-answer') { toast('Not a valid answer QR'); return; }
+      const partnerData = await parseDataQR(data, _sharedKey);
+      await savePartnerSessionData(partnerData);
 
-      section.querySelector('#scan-status').textContent = 'Answer received — connecting...';
-
-      await receiveAnswer(answerPayload);
-      await savePartnerFromPayload(answerPayload);
-
+      if (!alreadyShownOwn) {
+        // They shared first — now show ours
+        renderShowDataQR(container, true);
+      } else {
+        // Both rounds complete
+        renderSyncComplete(container);
+      }
     } catch (err) {
-      toast('Error: ' + err.message);
+      if (statusEl) {
+        statusEl.textContent = 'Decrypt failed — wrong partner or mismatched keys?';
+        statusEl.className = 'badge badge-danger';
+        statusEl.classList.remove('pulse');
+      }
+      console.error('[RAE] Data QR decrypt error:', err);
     }
   });
 }
 
-// ── CONNECTED HANDLERS ────────────────────────────────────────────────────────
-// Mutual success: both sides exchange data AND send an ack signal.
-// Only when both received + acked do we show confirmed success and close.
-
-let _receivedPartnerData = false;
-let _partnerAcked = false;
-
-function resetHandshakeState() {
-  _receivedPartnerData = false;
-  _partnerAcked = false;
-}
-
-function handlePartnerAck(container) {
-  _partnerAcked = true;
-  checkMutualSuccess(container);
-}
-
-function checkMutualSuccess(container) {
-  if (!_receivedPartnerData || !_partnerAcked) return;
-  const statusEl = container.querySelector('#connection-status');
-  if (statusEl) {
-    statusEl.innerHTML = `
-      <div style="display:flex;flex-direction:column;gap:0.75rem;">
-        <div class="badge badge-success" style="justify-content:center;">
-          ✓ Mutually connected — both partners synced
+function renderSyncComplete(container) {
+  container.innerHTML = `
+    <div class="stack stack-lg fade-in text-center" style="padding-top:1rem;">
+      <div style="font-size:2.5rem;">✓</div>
+      <div class="display display-sm">Synced</div>
+      <p style="font-family:var(--font-serif);font-style:italic;color:var(--text-muted);font-size:0.9rem;">
+        Both partners' data has been exchanged and encrypted.
+        Your session is ready.
+      </p>
+      <div class="card-sm" style="display:flex;align-items:center;gap:0.75rem;text-align:left;">
+        <img
+          src="${svgToDataURL(generateIdenticon(
+            _partnerPublicKey ? _partnerPublicKey.slice(0, 32) : '0'.repeat(32)
+          ))}"
+          style="width:40px;height:40px;border-radius:6px;"
+        />
+        <div>
+          <div style="font-size:0.88rem;">${_partnerAlias}</div>
+          <div class="mono" style="font-size:0.65rem;color:var(--success);">Connected</div>
         </div>
-        <button class="btn btn-primary btn-full" id="go-survey-btn">
-          Begin Pass 1 →
-        </button>
       </div>
-    `;
-    statusEl.querySelector('#go-survey-btn')?.addEventListener('click', async () => {
-      await navigate('survey', { currentPass: 1 });
-    });
-  }
-  closeConnection();
-}
+      <button class="btn btn-primary btn-full" id="begin-pass1-btn">
+        Begin Pass 1 →
+      </button>
+    </div>
+  `;
 
-async function handleConnectedAsInitiator(container) {
-  resetHandshakeState();
-  setMessageHandler(async ({ type, data }) => {
-    if (type === 'payload') await handleReceivedPayload(data, container);
-    if (type === 'signal' && data?.signal === 'ack') handlePartnerAck(container);
+  container.querySelector('#begin-pass1-btn').addEventListener('click', async () => {
+    await navigate('survey', { currentPass: 1 });
   });
-  await sendMySession(container);
 }
 
-async function handleConnectedAsResponder(container) {
-  resetHandshakeState();
-  setMessageHandler(async ({ type, data }) => {
-    if (type === 'payload') await handleReceivedPayload(data, container);
-    if (type === 'signal' && data?.signal === 'ack') handlePartnerAck(container);
-  });
-  await sendMySession(container);
-}
+// ── EXISTING RELATIONSHIPS ────────────────────────────────────────────────────
 
-async function sendMySession(container) {
+async function loadExistingRelationships(container) {
   try {
-    const session = state.activeSession;
-    if (!session) { toast('No active session to share'); return; }
-
-    const theirPublicKey = state.peerPublicKey;
-    if (!theirPublicKey) { toast('Partner public key not found'); return; }
-
-    const myPrivateKey = getMyPrivateKey();
-    if (!myPrivateKey) {
-      toast('Keypair not loaded — please lock and unlock the app');
+    const rels = await loadAllRelationships();
+    if (!rels.length) {
+      container.innerHTML = `<div style="font-size:0.78rem;color:var(--text-muted);">No prior connections.</div>`;
       return;
     }
+    container.innerHTML = rels.map(rel => `
+      <div class="row-between" style="padding:0.5rem 0;border-bottom:1px solid var(--border);cursor:pointer;"
+        data-rel-id="${rel.id}">
+        <div style="display:flex;align-items:center;gap:0.5rem;">
+          <img src="${rel.partnerIdenticon}" style="width:28px;height:28px;border-radius:4px;"/>
+          <span style="font-size:0.82rem;">${rel.partnerAlias}</span>
+        </div>
+        <span style="font-size:0.72rem;color:var(--text-muted);">Resume →</span>
+      </div>
+    `).join('');
 
-    await sendPayload({ type: 'session-sync', session }, theirPublicKey, myPrivateKey);
-    toast('Session data sent to partner');
+    container.querySelectorAll('[data-rel-id]').forEach(el => {
+      el.addEventListener('click', async () => {
+        const id = el.dataset.relId;
+        state.activeRelationshipId = id;
+        const session = await loadLatestSession(id);
+        state.activeSession = session;
+        await navigate('survey', { currentPass: session?.signoffs?.pass1?.mine ? 2 : 1 });
+      });
+    });
   } catch (err) {
-    toast('Send error: ' + err.message);
+    container.innerHTML = `<div style="font-size:0.78rem;color:var(--danger);">Could not load connections.</div>`;
   }
 }
 
-async function handleReceivedPayload(encryptedData, container) {
-  try {
-    const myPrivateKey = getMyPrivateKey();
-    if (!myPrivateKey) throw new Error('Private key not loaded — lock and unlock the app');
-    if (!state.peerPublicKey) throw new Error('Partner public key not found');
+// ── DATA HELPERS ──────────────────────────────────────────────────────────────
 
-    // Decrypt using ECDH-derived shared key
-    const payload = await decryptPayload(encryptedData, state.peerPublicKey, myPrivateKey);
-
-    if (payload.type === 'session-sync' && payload.session) {
-      state.partnerSession = payload.session;
-      await saveRelationshipFromSession(payload.session);
-
-      // Mark received and send ACK so partner knows we got their data
-      _receivedPartnerData = true;
-      sendSignal('ack');
-
-      const statusEl = container.querySelector('#connection-status');
-      if (statusEl) {
-        statusEl.innerHTML = `
-          <div class="badge badge-neutral pulse">
-            ✓ Data received — waiting for partner confirmation...
-          </div>
-        `;
-      }
-
-      // Partner may have already acked before we received — check now
-      checkMutualSuccess(container);
-    }
-  } catch (err) {
-    console.error('[RAE] Payload error:', err);
-    const statusEl = container.querySelector('#connection-status');
-    if (statusEl) statusEl.innerHTML = `<div class="badge badge-danger">Sync error: ${err.message}</div>`;
-  }
+function buildSessionPayload() {
+  // Send the active session — only what's been filled in
+  const session = state.activeSession;
+  if (!session) throw new Error('No active session — complete at least Pass 1 first');
+  return {
+    type: 'session-sync',
+    session: {
+      relationshipId: session.relationshipId,
+      domains: session.domains,
+      signoffs: session.signoffs,
+    },
+  };
 }
 
-// ── PARTNER MANAGEMENT ────────────────────────────────────────────────────────
+async function savePartnerFromKey(publicKey, alias) {
+  const keyHash = await hashPublicKey(publicKey);
+  const identiconSVG = generateIdenticon(keyHash);
+  const identiconURL = svgToDataURL(identiconSVG);
 
-async function savePartnerFromPayload(payload) {
-  const keyHash = await hashPublicKey(payload.publicKey);
-  state.peerPublicKey = payload.publicKey;
+  state.peerPublicKey = publicKey;
 
   const existing = await loadRelationship(keyHash);
   if (existing) {
     state.activeRelationshipId = keyHash;
+    const session = await loadLatestSession(keyHash);
+    state.activeSession = session;
     return;
   }
 
-  const identicon = payload.identicon || svgToDataURL(generateIdenticon(keyHash));
-
   const relationship = {
     id: keyHash,
-    partnerAlias: payload.alias || 'Partner',
-    partnerIdenticon: identicon,
-    partnerPublicKey: payload.publicKey,
+    partnerAlias: alias,
+    partnerIdenticon: identiconURL,
+    partnerPublicKey: publicKey,
     partnerKeyHash: keyHash,
     status: 'active',
     edgesUnlocked: false,
@@ -434,42 +499,71 @@ async function savePartnerFromPayload(payload) {
   await saveRelationship(relationship);
   state.activeRelationshipId = keyHash;
 
-  // Create empty session if none exists
-  const existingSession = await loadLatestSession(keyHash);
-  if (!existingSession) {
+  const session = await loadLatestSession(keyHash);
+  if (!session) {
     const newSession = createEmptySession(keyHash);
     await saveSession(newSession);
     state.activeSession = newSession;
+  } else {
+    state.activeSession = session;
   }
 }
 
-async function saveRelationshipFromSession(theirSession) {
-  if (!state.activeRelationshipId) return;
-  const rel = await loadRelationship(state.activeRelationshipId);
-  if (rel) {
-    rel.lastSyncAt = Date.now();
-    await saveRelationship(rel);
+async function savePartnerSessionData(partnerData) {
+  if (partnerData.type !== 'session-sync' || !partnerData.session) {
+    throw new Error('Unexpected data format');
+  }
+  state.partnerSession = partnerData.session;
+
+  // Update last sync time on relationship
+  if (state.activeRelationshipId) {
+    const rel = await loadRelationship(state.activeRelationshipId);
+    if (rel) {
+      rel.lastSyncAt = Date.now();
+      await saveRelationship(rel);
+    }
   }
 }
 
-// ── CAMERA UTILITIES ──────────────────────────────────────────────────────────
+// ── QR RENDERING ──────────────────────────────────────────────────────────────
 
-let _stream = null;
-let _scanInterval = null;
-
-async function startCameraAndScan(container, onResult) {
+async function renderQRCode(container, data) {
+  if (!container) return;
+  if (!window.QRCode) {
+    container.innerHTML = `<div class="badge badge-danger">QR library not loaded</div>`;
+    return;
+  }
+  const canvas = document.createElement('canvas');
   try {
-    _stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 640 } }
+    await window.QRCode.toCanvas(canvas, data, {
+      width: 240,
+      margin: 2,
+      color: { dark: '#1A1410', light: '#FFFFFF' },
+      errorCorrectionLevel: 'L',
     });
+    container.innerHTML = '';
+    const wrap = document.createElement('div');
+    wrap.className = 'qr-canvas-wrap';
+    wrap.appendChild(canvas);
+    container.appendChild(wrap);
+  } catch (err) {
+    container.innerHTML = `<div class="badge badge-danger">QR error: ${err.message}</div>`;
+  }
+}
 
+// ── CAMERA ────────────────────────────────────────────────────────────────────
+
+function startCameraAndScan(container, onResult) {
+  navigator.mediaDevices.getUserMedia({
+    video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 640 } }
+  }).then(async stream => {
+    _stream = stream;
     const video = container.querySelector('#scan-video');
     const statusEl = container.querySelector('#scan-status');
     if (!video) return;
 
-    video.srcObject = _stream;
+    video.srcObject = stream;
     await video.play();
-
     if (statusEl) {
       statusEl.textContent = 'Scanning...';
       statusEl.className = 'badge badge-warning pulse';
@@ -484,27 +578,25 @@ async function startCameraAndScan(container, onResult) {
       canvas.height = video.videoHeight;
       ctx.drawImage(video, 0, 0);
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-
       if (window.jsQR) {
         const code = window.jsQR(imageData.data, imageData.width, imageData.height, {
           inversionAttempts: 'dontInvert',
         });
         if (code) {
           clearInterval(_scanInterval);
-          onResult(code.data); // callback owns its own status messages
+          _scanInterval = null;
+          onResult(code.data);
         }
       }
     }, 200);
-
-  } catch (err) {
+  }).catch(err => {
     const statusEl = container.querySelector('#scan-status');
     if (statusEl) {
       statusEl.textContent = 'Camera access denied';
       statusEl.className = 'badge badge-danger';
       statusEl.classList.remove('pulse');
     }
-    toast('Camera permission required for scanning');
-  }
+  });
 }
 
 function stopCamera() {
@@ -512,46 +604,7 @@ function stopCamera() {
   if (_stream) { _stream.getTracks().forEach(t => t.stop()); _stream = null; }
 }
 
-// ── QR RENDERING ──────────────────────────────────────────────────────────────
-
-async function renderQRCode(container, data) {
-  if (!container) return;
-  if (!window.QRCode) {
-    container.innerHTML = `<div class="badge badge-danger">QR library not loaded</div>`;
-    return;
-  }
-
-  const canvas = document.createElement('canvas');
-  try {
-    await window.QRCode.toCanvas(canvas, data, {
-      width: 240,
-      margin: 2,
-      color: { dark: '#1A1410', light: '#FFFFFF' },
-      errorCorrectionLevel: 'L',  // L=7% recovery — sufficient for face-to-face scan, produces smaller QR
-    });
-    container.innerHTML = '';
-    const wrap = document.createElement('div');
-    wrap.className = 'qr-canvas-wrap';
-    wrap.appendChild(canvas);
-    container.appendChild(wrap);
-  } catch (err) {
-    container.innerHTML = `<div class="badge badge-danger">QR generation failed: ${err.message}</div>`;
-  }
-}
-
-// ── HELPERS ───────────────────────────────────────────────────────────────────
-
-function getMyPublicKey() {
-  // Returns the base64 public key from identity (loaded at unlock)
-  return state.identity?.publicKey || '';
-}
-
-function getMyPrivateKey() {
-  // Returns the live CryptoKey private key from the active keypair
-  // Loaded from IDB into memory during PIN unlock via loadAndActivateKeypair()
-  const keypair = getActiveKeypair();
-  return keypair?.privateKey || null;
-}
+// ── NAV ───────────────────────────────────────────────────────────────────────
 
 function bindNavEvents(wrap) {
   wrap.querySelectorAll('[data-nav]').forEach(btn => {
