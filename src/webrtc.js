@@ -139,3 +139,23 @@ async function inflate(b64url) {
   writer.close();
   return new Response(ds.readable).text();
 }
+
+// ── EDGES UNLOCK QR ───────────────────────────────────────────────────────────
+// Tiny plain-JSON QRs (~115 chars) — no encryption needed,
+// public keys are not secret. Partner's key is verified on receive.
+
+export function buildUnlockRequestQR(myPublicKey) {
+  return JSON.stringify({ v: 1, t: 'edges-req', k: myPublicKey });
+}
+
+export function buildUnlockConfirmQR(myPublicKey) {
+  return JSON.stringify({ v: 1, t: 'edges-ok', k: myPublicKey });
+}
+
+export function parseUnlockQR(str) {
+  const obj = JSON.parse(str);
+  if (obj.v !== 1) throw new Error('Unknown QR version');
+  if (obj.t !== 'edges-req' && obj.t !== 'edges-ok') throw new Error('Not an unlock QR');
+  if (!obj.k) throw new Error('Missing public key');
+  return { type: obj.t, publicKey: obj.k };
+}

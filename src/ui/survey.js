@@ -211,18 +211,8 @@ function buildDomainCards(container, session, pass, edgesUnlocked, relationship)
 
       if (relationship) {
         section.querySelector('#request-unlock-btn')?.addEventListener('click', async () => {
-          const sess = state.activeSession;
-          if (sess) {
-            sess.edgesUnlockRequested = true;
-            sess.updatedAt = Date.now();
-            await saveSession(sess);
-          }
-          const btn = section.querySelector('#request-unlock-btn');
-          if (btn) {
-            btn.textContent = '✓ Unlock requested';
-            btn.disabled = true;
-          }
-          toast('Edges unlock flagged — sync with your partner to confirm mutually.');
+          // Navigate to connect with unlock mode — uses the existing QR exchange flow
+          await navigate('connect', { connectMode: 'unlock' });
         });
       }
     } else {
@@ -602,9 +592,10 @@ function buildSignoffSection(container, session, pass, relationship, edgesUnlock
 
   const signoffBtn = section.querySelector('#signoff-btn');
 
-  // Check current completion
-  const total = DOMAINS.length;
-  const done = DOMAINS.filter(d => {
+  // Use same filtered count as updateCompletionCount — exclude locked Edges
+  const required = DOMAINS.filter(d => !(isEdgesDomain(d.id) && !edgesUnlocked));
+  const total = required.length;
+  const done = required.filter(d => {
     if (session.domains[d.id].notApplicable) return true;
     const data = pass === 1 ? session.domains[d.id].pass1 : session.domains[d.id].pass2;
     return isPassComplete(d, data, pass);

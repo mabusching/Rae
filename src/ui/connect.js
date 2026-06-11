@@ -16,11 +16,12 @@ import {
   buildIdentityQR, parseIdentityQR,
   buildDataQR, parseDataQR,
   deriveSharedKeyFromPartner,
+  buildUnlockRequestQR, buildUnlockConfirmQR, parseUnlockQR,
 } from '../webrtc.js';
 import {
   saveRelationship, loadRelationship, loadAllRelationships,
   saveSession, loadLatestSession, createEmptySession,
-  getActiveKeypair,
+  getActiveKeypair, clearEncryptionKey,
 } from '../storage.js';
 import { hashPublicKey } from '../crypto.js';
 import { generateIdenticon, svgToDataURL, shortFingerprint } from '../identity.js';
@@ -50,12 +51,17 @@ export async function renderConnect() {
 
   const content = document.createElement('div');
   content.className = 'page';
+
+  const isUnlockMode = state.connectMode === 'unlock';
+
   content.innerHTML = `
     <div style="margin-bottom:2rem;">
-      <div class="label" style="margin-bottom:0.25rem;">Connect</div>
-      <div class="display display-sm">Partner Sync</div>
+      <div class="label" style="margin-bottom:0.25rem;">${isUnlockMode ? 'Edges Unlock' : 'Connect'}</div>
+      <div class="display display-sm">${isUnlockMode ? 'Mutual Unlock Exchange' : 'Partner Sync'}</div>
       <p style="font-family:var(--font-serif);font-style:italic;color:var(--text-muted);font-size:0.9rem;line-height:1.6;margin-top:0.5rem;">
-        Two rounds of QR scans. No servers, no accounts, no internet required.
+        ${isUnlockMode
+          ? 'Both partners must scan each other's unlock QR. Two scans, then Edges are available.'
+          : 'Two rounds of QR scans. No servers, no accounts, no internet required.'}
       </p>
     </div>
     <div id="connect-body"></div>
@@ -67,7 +73,11 @@ export async function renderConnect() {
   wrap.appendChild(_nav);
 
   setTimeout(() => {
-    renderRound1Options(content.querySelector('#connect-body'));
+    if (isUnlockMode) {
+      renderUnlockOptions(content.querySelector('#connect-body'));
+    } else {
+      renderRound1Options(content.querySelector('#connect-body'));
+    }
     bindNavEvents(wrap);
   }, 0);
 
@@ -417,6 +427,156 @@ function renderSyncComplete(container) {
   container.querySelector('#begin-pass1-btn').addEventListener('click', async () => {
     await navigate('survey', { currentPass: 1 });
   });
+}
+
+
+// ── EDGES UNLOCK FLOW ─────────────────────────────────────────────────────────
+
+function renderUnlockOptions(container) {
+  container.innerHTML = `
+    <div class="stack stack-md">
+      <div class="card" style="background:rgba(75,175,125,0.06);border-color:rgba(75,175,125,0.25);">
+        <div class="label" style="color:var(--edges);margin-bottom:0.5rem;">How it works</div>
+        <p style="font-family:var(--font-serif);font-style:italic;color:var(--text-muted);font-size:0.85rem;line-height:1.6;">
+          Show your unlock QR → partner scans and confirms → partner shows theirs → you scan.
+          Both devices unlock simultaneously.
+        </p>
+      </div>
+      <button class="btn btn-primary btn-full" id="show-unlock-btn">Show My Unlock QR</button>
+      <button class="btn btn-outline btn-full" id="scan-unlock-btn">Scan Partner's Unlock QR First</button>
+    </div>
+  `;
+  container.querySelector('#show-unlock-btn').addEventListener('click', () => renderShowUnlockQR(container, false));
+  container.querySelector('#scan-unlock-btn').addEventListener('click', () => renderScanUnlockQR(container, false));
+}
+
+async function renderShowUnlockQR(container, afterScan) {
+  const identity = state.identity;
+  container.innerHTML = `
+    <div class="stack stack-md">
+      <div class="row-between">
+        <div class="label">Your Unlock QR</div>
+        <button class="btn btn-ghost btn-sm" id="back-btn">← Back</button>
+      </div>
+      <p style="font-family:var(--font-serif);font-style:italic;color:var(--text-muted);font-size:0.85rem;">
+        Ask your partner to scan this, then tap confirm on their device.
+      </p>
+      <div id="unlock-qr-wrap" class="qr-container"></div>
+      <hr class="divider"/>
+      <div class="label" style="margin-bottom:0.5rem;">They confirmed? Now scan theirs:</div>
+      <button class="btn btn-primary btn-full" id="scan-their-unlock-btn">Scan Partner's QR →</button>
+    </div>
+  `;
+  container.querySelector('#back-btn').addEventListener('click', () => renderUnlockOptions(container));
+  container.querySelector('#scan-their-unlock-btn').addEventListener('click', () => renderScanUnlockQR(container, true));
+  const qrStr = buildUnlockRequestQR(identity.publicKey);
+  await renderQRCode(container.querySelector('#unlock-qr-wrap'), qrStr);
+}
+
+async function renderScanUnlockQR(container, alreadyShownOwn) {
+  container.innerHTML = `
+    <div class="stack stack-md">
+      <div class="row-between">
+        <div class="label">Scan Unlock QR</div>
+        <button class="btn btn-ghost btn-sm" id="back-btn">← Back</button>
+      </div>
+      <div class="scan-viewfinder" id="viewfinder">
+        <video id="scan-video" autoplay muted playsinline></video>
+        <div class="scan-overlay"><div class="scan-frame"></div></div>
+      </div>
+      <div id="scan-status" class="badge badge-neutral pulse text-center">Starting camera...</div>
+    </div>
+  `;
+  container.querySelector('#back-btn').addEventListener('click', () => {
+    stopCamera();
+    if (alreadyShownOwn) renderShowUnlockQR(container, true);
+    else renderUnlockOptions(container);
+  });
+  startCameraAndScan(container, async (data) => {
+    stopCamera();
+    const statusEl = container.querySelector('#scan-status');
+    try {
+      const { type, publicKey } = parseUnlockQR(data);
+      const rel = state.activeRelationshipId ? await loadRelationship(state.activeRelationshipId) : null;
+      if (rel && rel.partnerPublicKey !== publicKey) throw new Error('QR is from an unknown partner');
+      if (type === 'edges-req') {
+        renderConfirmUnlock(container, publicKey, alreadyShownOwn);
+      } else if (type === 'edges-ok') {
+        await setEdgesUnlocked();
+        renderUnlockComplete(container);
+      }
+    } catch (err) {
+      if (statusEl) {
+        statusEl.textContent = 'Error: ' + err.message;
+        statusEl.className = 'badge badge-danger';
+        statusEl.classList.remove('pulse');
+      }
+    }
+  });
+}
+
+async function renderConfirmUnlock(container, partnerPublicKey, alreadyShownOwn) {
+  container.innerHTML = `
+    <div class="stack stack-md fade-in">
+      <div class="display display-sm">Confirm Edges Unlock</div>
+      <p style="font-family:var(--font-serif);font-style:italic;color:var(--text-muted);font-size:0.9rem;line-height:1.6;">
+        Your partner is requesting mutual Edges access. Confirming unlocks Romance,
+        Physicality, Touch, Sex, Kink, and Power Dynamic for both of you.
+        This requires mutual consent — this is it.
+      </p>
+      <button class="btn btn-primary btn-full" id="confirm-unlock-btn"
+        style="background:var(--edges);border-color:var(--edges);">✓ Confirm Unlock</button>
+      <button class="btn btn-ghost btn-full" id="decline-btn">Not now</button>
+    </div>
+  `;
+  container.querySelector('#confirm-unlock-btn').addEventListener('click', async () => {
+    await setEdgesUnlocked();
+    if (!alreadyShownOwn) renderShowConfirmQR(container);
+    else renderUnlockComplete(container);
+  });
+  container.querySelector('#decline-btn').addEventListener('click', () => renderUnlockOptions(container));
+}
+
+async function renderShowConfirmQR(container) {
+  const identity = state.identity;
+  container.innerHTML = `
+    <div class="stack stack-md fade-in">
+      <div class="badge badge-success text-center" style="justify-content:center;">✓ Edges unlocked on your device</div>
+      <div class="label">Show Confirmation QR</div>
+      <p style="font-family:var(--font-serif);font-style:italic;color:var(--text-muted);font-size:0.85rem;">
+        Ask your partner to scan this to unlock Edges on their device too.
+      </p>
+      <div id="confirm-qr-wrap" class="qr-container"></div>
+    </div>
+  `;
+  const qrStr = buildUnlockConfirmQR(identity.publicKey);
+  await renderQRCode(container.querySelector('#confirm-qr-wrap'), qrStr);
+}
+
+function renderUnlockComplete(container) {
+  container.innerHTML = `
+    <div class="stack stack-lg fade-in text-center" style="padding-top:1rem;">
+      <div style="font-size:2.5rem;">🔓</div>
+      <div class="display display-sm">Edges Unlocked</div>
+      <p style="font-family:var(--font-serif);font-style:italic;color:var(--text-muted);font-size:0.9rem;">
+        Both partners confirmed. Edges domains are now available in your surveys.
+      </p>
+      <button class="btn btn-primary btn-full" id="back-survey-btn">Return to Survey →</button>
+    </div>
+  `;
+  container.querySelector('#back-survey-btn').addEventListener('click', async () => {
+    await navigate('survey', { currentPass: state.currentPass || 1 });
+  });
+}
+
+async function setEdgesUnlocked() {
+  if (!state.activeRelationshipId) return;
+  const rel = await loadRelationship(state.activeRelationshipId);
+  if (rel) {
+    rel.edgesUnlocked = true;
+    await saveRelationship(rel);
+    toast('Edges unlocked');
+  }
 }
 
 // ── EXISTING RELATIONSHIPS ────────────────────────────────────────────────────
