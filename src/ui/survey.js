@@ -230,7 +230,7 @@ function buildDomainCards(container, session, pass, edgesUnlocked, relationship)
       cardsWrap.className = 'stack stack-sm';
 
       domains.forEach(domain => {
-        const card = buildDomainCard(domain, session, pass);
+        const card = buildDomainCard(domain, session, pass, edgesUnlocked);
         cardsWrap.appendChild(card);
       });
 
@@ -241,7 +241,7 @@ function buildDomainCards(container, session, pass, edgesUnlocked, relationship)
   });
 }
 
-function buildDomainCard(domain, session, pass) {
+function buildDomainCard(domain, session, pass, edgesUnlocked = false) {
   const domainData = session.domains[domain.id];
   const passData = pass === 1 ? domainData.pass1 : domainData.pass2;
   const isComplete = isPassComplete(domain, passData, pass);
@@ -298,7 +298,7 @@ function buildDomainCard(domain, session, pass) {
       session.updatedAt = Date.now();
       await saveSession(session);
       updateCard(card, domain, session, pass);
-      updateCompletionCount(card.closest('.page-wide') || document, session, pass);
+      updateCompletionCount(card.closest('.page-wide') || document, session, pass, edgesUnlocked);
     });
   }
 
