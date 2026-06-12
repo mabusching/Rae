@@ -57,6 +57,7 @@ function renderIdentityCard(container, identity) {
         </div>
       </div>
       <button class="btn btn-ghost btn-sm" id="lock-btn">Lock</button>
+      <button class="btn btn-ghost btn-sm" id="update-btn" style="font-size:0.65rem;opacity:0.5;" title="Clear cache and reload latest version">↻</button>
     </div>
   `;
 
@@ -67,6 +68,21 @@ function renderIdentityCard(container, identity) {
     state.activeRelationshipId = null;
     state.activeSession = null;
     await navigate('onboarding', { step: 'unlock' });
+  });
+
+  container.querySelector('#update-btn').addEventListener('click', async () => {
+    if (!confirm('Clear app cache and reload for latest version? Your data is safe — only cached files are cleared.')) return;
+    try {
+      // Delete all SW caches
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k)));
+      // Unregister SW so it reinstalls fresh on reload
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r => r.unregister()));
+    } catch (e) {
+      console.warn('[RAE] Cache clear error:', e);
+    }
+    window.location.reload();
   });
 }
 

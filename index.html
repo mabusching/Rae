@@ -84,6 +84,12 @@
             }
           });
         });
+
+        // Force iOS installed PWA to check for SW updates on every launch.
+        // Without this, iOS only checks on its own schedule (~24h).
+        // registration.update() re-fetches sw.js and triggers the full
+        // update cycle if the script has changed.
+        reg.update().catch(() => {});
       }).catch(err => console.warn('[RAE] SW registration failed:', err));
     }
   </script>
