@@ -5,7 +5,7 @@
  * whether hosted at root (/) or a subdirectory (/rae/ on GitHub Pages).
  */
 
-const CACHE_NAME = 'rae-v4';
+const CACHE_NAME = 'rae-v5';
 
 // Derive base path from SW location — handles both root and subdir hosting
 // e.g. https://user.github.io/rae/sw.js → base = '/rae'
@@ -62,7 +62,16 @@ self.addEventListener('activate', (event) => {
           .filter(name => name !== CACHE_NAME)
           .map(name => caches.delete(name))
       );
-    }).then(() => self.clients.claim())
+    })
+    .then(() => self.clients.claim())
+    .then(() => {
+      // Tell all open clients to reload so they get fresh files.
+      // This works even if the old index.html didn't have a controllerchange listener.
+      return self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+        .then(clients => clients.forEach(client => {
+          client.postMessage({ type: 'sw-updated', version: CACHE_NAME });
+        }));
+    })
   );
 });
 

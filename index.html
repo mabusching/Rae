@@ -60,20 +60,26 @@
 
   <script>
     if ('serviceWorker' in navigator) {
-      // Reload the page when a new SW takes control so fresh files are served.
-      // Without this, skipWaiting activates the new SW but the old cached
-      // JS modules are still running until the next manual reload.
-      navigator.serviceWorker.addEventListener('controllerchange', () => {
-        window.location.reload();
+      // Two reload mechanisms — belt and suspenders:
+      // 1. SW sends 'sw-updated' message directly to all clients on activate
+      // 2. controllerchange fires when new SW takes over (backup)
+      // Both work independently so whichever fires first triggers the reload.
+      let _reloading = false;
+      function reloadOnce() {
+        if (!_reloading) { _reloading = true; window.location.reload(); }
+      }
+
+      navigator.serviceWorker.addEventListener('message', (event) => {
+        if (event.data?.type === 'sw-updated') reloadOnce();
       });
+
+      navigator.serviceWorker.addEventListener('controllerchange', reloadOnce);
 
       navigator.serviceWorker.register('./sw.js').then(reg => {
         reg.addEventListener('updatefound', () => {
           const worker = reg.installing;
           worker.addEventListener('statechange', () => {
             if (worker.state === 'installed' && navigator.serviceWorker.controller) {
-              // New version ready — skip waiting so it activates immediately,
-              // which triggers controllerchange above and reloads the page.
               worker.postMessage('skip-waiting');
             }
           });
