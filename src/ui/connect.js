@@ -60,7 +60,7 @@ export async function renderConnect() {
       <div class="display display-sm">${isUnlockMode ? 'Mutual Unlock Exchange' : 'Partner Sync'}</div>
       <p style="font-family:var(--font-serif);font-style:italic;color:var(--text-muted);font-size:0.9rem;line-height:1.6;margin-top:0.5rem;">
         ${isUnlockMode
-          ? 'Both partners must scan each other's unlock QR. Two scans, then Edges are available.'
+          ? "Both partners must scan each other's unlock QR. Two scans, then Edges are available."
           : 'Two rounds of QR scans. No servers, no accounts, no internet required.'}
       </p>
     </div>
