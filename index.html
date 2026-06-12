@@ -1,6 +1,31 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <script>
+    // Version bootstrap — runs before any modules load.
+    // If the stored version doesn't match, wipe all caches and reload.
+    // This breaks the stale-SW catch-22 on iOS installed PWAs.
+    (async () => {
+      const V = 'rae-v5';
+      try {
+        const stored = localStorage.getItem('rae-cache-version');
+        if (stored && stored !== V) {
+          localStorage.setItem('rae-cache-version', V);
+          if ('caches' in window) {
+            const keys = await caches.keys();
+            await Promise.all(keys.map(k => caches.delete(k)));
+          }
+          if ('serviceWorker' in navigator) {
+            const regs = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(regs.map(r => r.unregister()));
+          }
+          window.location.reload();
+          return;
+        }
+        localStorage.setItem('rae-cache-version', V);
+      } catch(e) {}
+    })();
+  </script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#0E0B08" />
